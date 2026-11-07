@@ -1,0 +1,99 @@
+# Automatically build the project and run any configured tests for every push
+# and submitted pull request. This can help catch issues that only occur on
+# certain platforms or Java versions, and provides a first line of defence
+# against bad commits.
+
+name: build
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+    inputs:
+      run_client_gametests:
+        description: Run headless client GameTests
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v5
+      - name: install workflow tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl jq perl ripgrep shellcheck tar
+      - name: shellcheck scripts
+        run: |
+          scripts=(.github/scripts/*.sh)
+          if [ -f init.sh ]; then
+            scripts+=(init.sh)
+          fi
+          shellcheck "${scripts[@]}"
+      - name: validate gradle wrapper
+        uses: gradle/actions/wrapper-validation@v5
+      - name: setup jdk
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'microsoft'
+      - name: make gradle wrapper executable
+        run: chmod +x ./gradlew
+      - name: build
+        run: ./gradlew build
+      - name: smoke test generated templates
+        if: ${{ hashFiles('init.sh') != '' }}
+        run: bash .github/scripts/smoke_template_generation.sh
+      - name: store reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reports
+          path: |
+            **/build/reports/
+            **/build/test-results/
+      - name: capture build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: Artifacts
+          path: build/libs/
+
+  client-gametests:
+    name: client GameTests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    if: ${{ vars.RUN_CLIENT_GAMETESTS != 'false' && (github.event_name != 'workflow_dispatch' || inputs.run_client_gametests) }}
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v5
+      - name: install client test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb mesa-utils libflite1 libgl1-mesa-dri libglx-mesa0 libxi6 libxrandr2 libxrender1 libxtst6 libxinerama1 libxcursor1 libxxf86vm1
+      - name: validate gradle wrapper
+        uses: gradle/actions/wrapper-validation@v5
+      - name: setup jdk
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'microsoft'
+      - name: setup gradle
+        uses: gradle/actions/setup-gradle@v5
+      - name: make gradle wrapper executable
+        run: chmod +x ./gradlew
+      - name: run client GameTests
+        env:
+          ALSOFT_DRIVERS: "null"
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: xvfb-run -a --server-args="-screen 0 1280x720x24" ./gradlew --no-daemon runClientGameTest
+      - name: store client GameTest reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: client-gametest-reports
+          path: |
+            **/build/reports/
+            **/build/test-results/
+            **/build/run/clientGameTest/logs/
