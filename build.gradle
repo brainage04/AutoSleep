@@ -1,0 +1,209 @@
+plugins {
+	id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
+	id 'maven-publish'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = project.archives_base_name
+}
+
+repositories {
+	// Loom / Minecraft / Fabric
+	mavenCentral()
+	mavenLocal()
+	maven { url "https://libraries.minecraft.net" }
+	maven { url "https://maven.fabricmc.net/" }
+
+	// DevAuth
+	maven { url = "https://pkgs.dev.azure.com/djtheredstoner/DevAuth/_packaging/public/maven/v1" }
+
+	// Baritone publishes its Fabric jars only as GitHub release assets.
+	exclusiveContent {
+		forRepository {
+			ivy {
+				name = "Baritone releases"
+				url = "https://github.com/cabaletta/baritone/releases/download/"
+				patternLayout { artifact "v[revision]/[module]-[revision].[ext]" }
+				metadataSources { artifact() }
+			}
+		}
+		filter { includeGroup "cabaletta" }
+	}
+
+	// Baritone's own dependency, nested in its jar; Loom strips nested jars from development dependencies.
+	exclusiveContent {
+		forRepository {
+			maven {
+				name = "babbaj"
+				url = "https://babbaj.github.io/maven/"
+			}
+		}
+		filter { includeGroup "dev.babbaj" }
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings loom.officialMojangMappings()
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	testImplementation "net.fabricmc:fabric-loader-junit:${project.loader_version}"
+
+	// DevAuth
+	modRuntimeOnly("me.djtheredstoner:DevAuth-fabric:1.2.2")
+
+	// Walks the player to a bed out of reach; shipped inside the mod's jar, nether-pathfinder included.
+	modImplementation "cabaletta:baritone-api-fabric:${project.baritone_version}"
+	include "cabaletta:baritone-api-fabric:${project.baritone_version}"
+	modRuntimeOnly "dev.babbaj:nether-pathfinder:${project.nether_pathfinder_version}"
+}
+
+processResources {
+	inputs.property "mod_id", project.properties.mod_id
+	inputs.property "mod_version", project.version
+	inputs.property "mod_name", project.properties.mod_name
+	inputs.property "loader_version", project.properties.loader_version
+	inputs.property "minecraft_version", project.properties.minecraft_version
+
+	filesMatching("fabric.mod.json") {
+	expand([
+				"mod_id": inputs.properties.mod_id,
+				"mod_version": inputs.properties.mod_version,
+				"mod_name": inputs.properties.mod_name,
+				"loader_version": inputs.properties.loader_version,
+				"minecraft_version": inputs.properties.minecraft_version,
+		])
+	}
+}
+
+loom {
+	splitEnvironmentSourceSets()
+
+	mods {
+		autosleep {
+			sourceSet sourceSets.main
+			sourceSet sourceSets.client
+		}
+	}
+
+	runs {
+		matching { it.name == "clientGameTest" }.configureEach {
+			// A 720p window, so client GameTest screenshots and recordings fill a 1280x720 Xvfb screen.
+			programArgs "--width", "1280", "--height", "720"
+			// A host whose DevAuth config enables it would otherwise wait forever for a Microsoft login.
+			vmArg "-Ddevauth.enabled=false"
+		}
+	}
+}
+
+fabricApi {
+	configureTests {
+		createSourceSet = true
+		modId = "${project.mod_id}-gametest"
+		enableGameTests = false
+		enableClientGameTests = true
+		eula = true
+	}
+}
+
+tasks.named("processGametestResources") {
+	inputs.property "mod_id", project.properties.mod_id
+	inputs.property "mod_version", project.version
+	inputs.property "mod_name", project.properties.mod_name
+
+	filesMatching("fabric.mod.json") {
+		expand([
+				"mod_id": inputs.properties.mod_id,
+				"mod_version": inputs.properties.mod_version,
+				"mod_name": inputs.properties.mod_name,
+		])
+	}
+}
+
+def clientGameTestRunDir = layout.buildDirectory.dir("run/clientGameTest")
+
+// BEGIN CLIENT GAMETEST RUN SETUP
+tasks.register("prepareClientGameTestRun") {
+	def optionsFile = clientGameTestRunDir.map { it.file("options.txt") }
+
+	outputs.file(optionsFile)
+	mustRunAfter(tasks.named("deleteGameTestRunDir"))
+
+	doLast {
+		def settings = [
+				version              : "4671",
+				ao                   : "false",
+				autoJump             : "false",
+				biomeBlendRadius     : "0",
+				chunkSectionFadeInTime : "0.0",
+				enableVsync            : "false",
+				entityDistanceScaling  : "0.5",
+				entityShadows          : "false",
+				fullscreen             : "false",
+				graphicsPreset         : '"fast"',
+				guiScale               : "2",
+				improvedTransparency   : "false",
+				joinedFirstServer      : "true",
+				maxAnisotropyBit       : "1",
+				maxFps                 : "30",
+				menuBackgroundBlurriness: "0",
+				mipmapLevels           : "0",
+				narrator               : "0",
+				narratorHotkey         : "false",
+				particles              : "2",
+				prioritizeChunkUpdates : "0",
+				renderClouds           : '"false"',
+				renderDistance         : "5",
+				simulationDistance     : "5",
+				soundCategory_master   : "0.0",
+				soundCategory_music    : "0.0",
+				toggleSprint           : "true",
+				weatherRadius         : "5"
+		]
+		def file = optionsFile.get().asFile
+
+		file.parentFile.mkdirs()
+		file.text = settings.collect { key, value -> "${key}:${value}" }.join(System.lineSeparator()) + System.lineSeparator()
+	}
+}
+
+tasks.matching { it.name == "runClientGameTest" }.configureEach {
+	dependsOn(tasks.named("prepareClientGameTestRun"))
+}
+// END CLIENT GAMETEST RUN SETUP
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 21
+}
+
+java {
+	withSourcesJar()
+
+	sourceCompatibility = JavaVersion.VERSION_21
+	targetCompatibility = JavaVersion.VERSION_21
+}
+
+jar {
+	inputs.property "archivesName", project.base.archivesName
+
+	from("LICENSE") {
+		rename { "${it}_${inputs.properties.archivesName}"}
+	}
+}
+
+publishing {
+    publications {
+        create("mavenJava", MavenPublication) {
+            artifactId = project.archives_base_name
+            from components.java
+        }
+    }
+}
+
+test {
+	useJUnitPlatform()
+	systemProperty "fabric.side", "client"
+}

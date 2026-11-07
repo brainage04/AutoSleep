@@ -1,0 +1,29 @@
+{
+	"schemaVersion": 1,
+	"id": "${mod_id}",
+	"version": "${mod_version}",
+	"name": "${mod_name}",
+	"description": "Puts you to sleep in the nearest bed when night falls, walking there if it is out of reach. Client-side only: works on any server.",
+	"authors": [
+		"brainage04"
+	],
+	"contact": {
+		"homepage": "https://github.com/brainage04/AutoSleep",
+		"sources": "https://github.com/brainage04/AutoSleep"
+	},
+	"license": "MIT",
+	"icon": "assets/autosleep/icon.png",
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"io.github.brainage04.autosleep.AutoSleepClient"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=${loader_version}",
+		"minecraft": "~${minecraft_version}",
+		"java": ">=21",
+		"fabric-api": "*",
+		"baritone": "*"
+	}
+}
