@@ -51,8 +51,10 @@ public final class AutoSleeper {
     private boolean wasSleeping;
     /** The bed Baritone is walking to, or null when this class has not started a walk. */
     private @Nullable BlockPos walkingTo;
-    /** The integrated server's answer to the last question, written on the server thread; see {@link #integratedServerAllows}. */
+    /** The integrated server's latest answer, written on the server thread; see {@link #integratedServerAllows}. */
     private volatile @Nullable ServerAnswer serverAnswer;
+    /** The question the last attempt sent the integrated server, or null when it sent none. */
+    private @Nullable Question lastQuestion;
 
     public void tick(Minecraft minecraft) {
         LocalPlayer player = minecraft.player;
@@ -66,13 +68,14 @@ public final class AutoSleeper {
         if (player == null || level == null || minecraft.gameMode == null) {
             walkingTo = null;
             // Lets go of the last world's level.
+            lastQuestion = null;
             serverAnswer = null;
             return;
         }
         if (sleeping) {
             stopWalking();
-            // An answer given before the night was skipped must not be used in the morning.
-            serverAnswer = null;
+            // Nothing asked before the night was skipped may be used in the morning.
+            lastQuestion = null;
             return;
         }
         if (cooldownTicks > 0) {
@@ -81,13 +84,21 @@ public final class AutoSleeper {
         }
         cooldownTicks = RETRY_INTERVAL_TICKS;
 
+        // Every attempt takes the answer to the previous attempt's question, if any, and asks afresh only when it
+        // finds a bed in singleplayer: an attempt that asks nothing leaves nothing for the next one to use.
+        Question previousQuestion = lastQuestion;
+        ServerAnswer previousAnswer = serverAnswer;
+        lastQuestion = null;
+        serverAnswer = null;
+
         IntegratedServer server = minecraft.getSingleplayerServer();
         if (server == null && !remoteServerAllows(level, player.blockPosition())) {
             stopWalking();
             return;
         }
         BlockPos bed = findNearestBed(level, player);
-        if (bed == null || server != null && !integratedServerAllows(server, level, bedHead(level, bed))) {
+        if (bed == null || server != null
+                && !integratedServerAllows(server, new Question(level, bedHead(level, bed)), previousQuestion, previousAnswer)) {
             stopWalking();
             return;
         }
@@ -102,14 +113,15 @@ public final class AutoSleeper {
     }
 
     /**
-     * In singleplayer and on a LAN host the integrated server has the real rule. It is asked on its own thread, and the
-     * answer is used at the next attempt if it was about the same bed in the same level.
+     * In singleplayer and on a LAN host the integrated server has the real rule. It is asked on its own thread, and its
+     * answer is used at the next attempt only, and only if that attempt finds the same bed in the same level.
      */
-    private boolean integratedServerAllows(IntegratedServer server, ClientLevel level, BlockPos head) {
-        Question question = new Question(level, head);
-        ServerAnswer answer = serverAnswer;
+    private boolean integratedServerAllows(IntegratedServer server, Question question,
+                                           @Nullable Question previousQuestion, @Nullable ServerAnswer previousAnswer) {
+        lastQuestion = question;
         server.execute(() -> serverAnswer = askServer(server, question));
-        return answer != null && answer.question().equals(question) && answer.maySleep();
+        return previousAnswer != null && previousAnswer.question() == previousQuestion
+                && question.equals(previousQuestion) && previousAnswer.maySleep();
     }
 
     /** Runs on the integrated server's thread; a stopped server runs it in place, so it refuses there. */

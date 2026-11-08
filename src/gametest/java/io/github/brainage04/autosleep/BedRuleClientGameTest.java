@@ -52,6 +52,12 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
     private static final BlockPos BED_HEAD = PLAYER.offset(0, 0, 8);
     /** A second bed, in a patch of the test datapack's biome whose beds explode. */
     private static final BlockPos OTHER_BED_HEAD = PLAYER.offset(-10, 0, 0);
+    /** In reach of the bed at {@link #BED_HEAD}: in front of its foot, facing it. */
+    private static final Vec3 BESIDE_BED = new Vec3(PLAYER.getX() + 0.5D, Y, BED_HEAD.getZ() - 1.5D);
+    /** The top of the test datapack dimensions' flat ground (bedrock and three stone layers from y 0), far below the stage. */
+    private static final int GROUND_Y = 4;
+    /** Several of the mod's attempts with no bed in range. */
+    private static final int OUT_OF_RANGE_TICKS = AutoSleeper.RETRY_INTERVAL_TICKS * 4;
     /** Night by the Overworld clock; time advances only in the cases that skip the night. */
     private static final long MIDNIGHT = 18000L;
     /** Long enough for several of the mod's attempts. */
@@ -84,6 +90,8 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
             check(mode, server, EXPLODING_BEDS, Expect.STAYS_PUT);
             check(mode, server, ALLOWED_BEDS, Expect.SLEEPS);
             checkAnswerIsNotReusedForAnotherBed(server);
+            checkAnswerIsNotReusedInAnotherDimension(server);
+            checkAnswerIsNotReusedLater(server);
             check(mode, server, Level.OVERWORLD, Expect.SLEEPS_THROUGH_THE_NIGHT);
         }
 
@@ -221,11 +229,7 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
                 && !client.player.isSleeping() && client.level.getBlockState(OTHER_BED_HEAD).getBlock() instanceof BedBlock, 400);
         logRules(Mode.SINGLEPLAYER, server, ALLOWED_BEDS, OTHER_BED_HEAD);
 
-        Vec3 start = context.computeOnClient(client -> client.player.position());
-        try {
-            context.waitFor(client -> client.player.position().distanceTo(start) > 0.5D, WALK_AND_SLEEP_TIMEOUT_TICKS);
-        } catch (AssertionError e) {
-            failures.add(id + ": expected the mod to start walking to the first bed (" + e.getMessage() + ")");
+        if (!startWalkingInAllowedBeds(server, id)) {
             return;
         }
         ClientGameTestRecordingHud.log("Walking to the first bed; put beside the second");
@@ -233,26 +237,108 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
         teleport(server, ALLOWED_BEDS, OTHER_BED_HEAD.getX() + 1.5D, OTHER_BED_HEAD.getZ() + 0.5D, 90.0F);
         Vec3 besideOtherBed = Vec3.atBottomCenterOf(OTHER_BED_HEAD.east());
         context.waitFor(client -> client.player.position().distanceTo(besideOtherBed) < 1.0D, 100);
-        // Stop the walk to the first bed, so the second bed is still in reach at the mod's next attempt.
-        context.runOnClient(client -> BaritoneAPI.getProvider().getPrimaryBaritone().getPathingBehavior().cancelEverything());
-        context.waitTicks(WATCH_TICKS);
+        cancelWalk();
+        expectBedLeftAlone(id, server, ALLOWED_BEDS, OTHER_BED_HEAD);
+    }
 
-        int uses = serverBedUses.get();
-        boolean bedLeft = server.computeOnServer(minecraftServer ->
-                level(minecraftServer, ALLOWED_BEDS).getBlockState(OTHER_BED_HEAD).getBlock() instanceof BedBlock);
-        String outcome = "the server saw " + uses + " bed use(s), the second bed " + (bedLeft ? "is still there" : "is gone (exploded)");
-        System.out.println("[BED_RULE] " + id + ": " + outcome);
-        if (uses != 0 || !bedLeft) {
-            failures.add(id + ": expected the mod to leave the second bed alone, but " + outcome);
-            ClientGameTestRecordingHud.log("FAILED: " + outcome);
-        } else {
-            ClientGameTestRecordingHud.log("Left the second bed alone for " + WATCH_TICKS / 20 + " s");
+    /**
+     * The mod gets a "may sleep" answer for the bed in autosleep_test:allowed_beds and starts walking to it; the player is
+     * then put beside the bed at the same position in autosleep_test:exploding_beds, before the mod's next attempt. That
+     * answer was about the other dimension's bed, so the mod must not use this one.
+     */
+    private void checkAnswerIsNotReusedInAnotherDimension(TestServerContext server) {
+        String id = "singleplayer-other_dimension-bed";
+        step(id, "Walking to a bed in autosleep_test:allowed_beds, then put beside the bed at the same position in autosleep_test:exploding_beds",
+                "Never uses it: the answer was about the other dimension's bed");
+        server.runOnServer(minecraftServer -> {
+            buildStage(level(minecraftServer, ALLOWED_BEDS));
+            buildStage(level(minecraftServer, EXPLODING_BEDS));
+        });
+        server.runCommand("time set " + MIDNIGHT);
+        if (!startWalkingInAllowedBeds(server, id)) {
+            return;
+        }
+        ClientGameTestRecordingHud.log("Walking to the bed; put beside the same bed in exploding_beds");
+        serverBedUses.set(0);
+        teleport(server, EXPLODING_BEDS, PLAYER.getX() + 0.5D, Y, BESIDE_BED.z, 0.0F);
+        context.waitFor(client -> client.level.dimension() == EXPLODING_BEDS && client.player.position().distanceTo(BESIDE_BED) < 1.0D, 200);
+        cancelWalk();
+        expectBedLeftAlone(id, server, EXPLODING_BEDS, BED_HEAD);
+    }
+
+    /**
+     * The mod gets a "may sleep" answer for the bed in autosleep_test:allowed_beds and starts walking to it; the player is
+     * then put far below, out of range of any bed, for several attempts, while the bed's biome changes to one whose beds
+     * explode, and then back beside the bed. The old answer must not be used.
+     */
+    private void checkAnswerIsNotReusedLater(TestServerContext server) {
+        String id = "singleplayer-stale_answer-bed";
+        step(id, "Walking to a bed in autosleep_test:allowed_beds, then out of range while its biome changes to one whose beds explode",
+                "Back beside it: never uses it, the old answer is not reused");
+        server.runOnServer(minecraftServer -> buildStage(level(minecraftServer, ALLOWED_BEDS)));
+        server.runCommand("time set " + MIDNIGHT);
+        if (!startWalkingInAllowedBeds(server, id)) {
+            return;
+        }
+        ClientGameTestRecordingHud.log("Walking to the bed; put out of range for " + OUT_OF_RANGE_TICKS / 20 + " s");
+        serverBedUses.set(0);
+        // The flat ground far below the stage: the beds are out of the mod's vertical search range there.
+        teleport(server, ALLOWED_BEDS, PLAYER.getX() + 0.5D, GROUND_Y, PLAYER.getZ() + 0.5D, 0.0F);
+        context.waitFor(client -> client.player.getY() < GROUND_Y + 1, 100);
+        cancelWalk();
+        context.waitTicks(OUT_OF_RANGE_TICKS);
+        server.runCommand("execute in " + ALLOWED_BEDS.identifier() + " run fillbiome " + coordinates(BED_HEAD.offset(-4, -4, -4))
+                + " " + coordinates(BED_HEAD.offset(4, 4, 4)) + " autosleep_test:exploding_beds");
+        logRules(Mode.SINGLEPLAYER, server, ALLOWED_BEDS, BED_HEAD);
+        ClientGameTestRecordingHud.log("The bed's biome now makes beds explode; back beside the bed");
+        teleport(server, ALLOWED_BEDS, PLAYER.getX() + 0.5D, Y, BESIDE_BED.z, 0.0F);
+        context.waitFor(client -> client.player.position().distanceTo(BESIDE_BED) < 1.0D, 100);
+        expectBedLeftAlone(id, server, ALLOWED_BEDS, BED_HEAD);
+    }
+
+    /** Puts the player at the stage in autosleep_test:allowed_beds and waits until the mod starts walking to the bed. */
+    private boolean startWalkingInAllowedBeds(TestServerContext server, String id) {
+        teleport(server, ALLOWED_BEDS, PLAYER.getX() + 0.5D, Y, PLAYER.getZ() + 0.5D, 0.0F);
+        context.waitFor(client -> client.level.dimension() == ALLOWED_BEDS && client.player.blockPosition().equals(PLAYER)
+                && !client.player.isSleeping() && client.level.getBlockState(BED_HEAD).getBlock() instanceof BedBlock, 400);
+        Vec3 start = context.computeOnClient(client -> client.player.position());
+        try {
+            context.waitFor(client -> client.player.position().distanceTo(start) > 0.5D, WALK_AND_SLEEP_TIMEOUT_TICKS);
+            return true;
+        } catch (AssertionError e) {
+            failures.add(id + ": expected the mod to start walking to the bed (" + e.getMessage() + ")");
+            return false;
         }
     }
 
-    /** Puts the player on the stage floor in the dimension, looking 10 degrees down, so the bed sits just below the crosshair. */
+    /** Stops the walk the mod started, so the player stays where the test put them until the mod's next attempt. */
+    private void cancelWalk() {
+        context.runOnClient(client -> BaritoneAPI.getProvider().getPrimaryBaritone().getPathingBehavior().cancelEverything());
+    }
+
+    /** Watches for several attempts, then checks that the server saw no bed use and the bed is still there. */
+    private void expectBedLeftAlone(String id, TestServerContext server, ResourceKey<Level> dimension, BlockPos head) {
+        context.waitTicks(WATCH_TICKS);
+        int uses = serverBedUses.get();
+        boolean bedLeft = server.computeOnServer(minecraftServer ->
+                level(minecraftServer, dimension).getBlockState(head).getBlock() instanceof BedBlock);
+        String outcome = "the server saw " + uses + " bed use(s), the bed " + (bedLeft ? "is still there" : "is gone (exploded)");
+        System.out.println("[BED_RULE] " + id + ": " + outcome);
+        if (uses != 0 || !bedLeft) {
+            failures.add(id + ": expected the mod to leave the bed alone, but " + outcome);
+            ClientGameTestRecordingHud.log("FAILED: " + outcome);
+        } else {
+            ClientGameTestRecordingHud.log("Left the bed alone for " + WATCH_TICKS / 20 + " s");
+        }
+    }
+
+    /** Puts the player in the dimension, looking 10 degrees down, so a bed ahead sits just below the crosshair. */
     private static void teleport(TestServerContext server, ResourceKey<Level> dimension, double x, double z, float yaw) {
-        server.runCommand("execute in " + dimension.identifier() + " run tp @a " + x + " " + Y + " " + z + " " + yaw + " 10");
+        teleport(server, dimension, x, Y, z, yaw);
+    }
+
+    private static void teleport(TestServerContext server, ResourceKey<Level> dimension, double x, double y, double z, float yaw) {
+        server.runCommand("execute in " + dimension.identifier() + " run tp @a " + x + " " + y + " " + z + " " + yaw + " 10");
     }
 
     private static String coordinates(BlockPos pos) {
