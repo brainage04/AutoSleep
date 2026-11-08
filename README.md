@@ -1,6 +1,6 @@
 # AutoSleep
 
-A client-side Fabric mod for Minecraft 1.21.11: whenever the game would let you sleep (at night in the Overworld) and you are not already in bed, it puts you to sleep in the nearest bed, walking you there if it is out of reach.
+A client-side Fabric mod for Minecraft 1.21.11: whenever the game would let you sleep (at night, or in a thunderstorm, in the Overworld) and you are not already in bed, it puts you to sleep in the nearest bed, walking you there if it is out of reach.
 
 It uses the bed for you exactly as a right click would, so it works on any server, including vanilla servers without the mod.
 
@@ -20,7 +20,7 @@ Otherwise [Baritone](https://github.com/cabaletta/baritone) walks you next to it
 After waking up the mod waits two seconds, because the server sends the new day time only once a second and the morning would otherwise still look like night.
 
 The mod assumes the simple case: the bed is free and not obstructed, no monsters are nearby and time runs normally.
-On a server it also assumes that no datapack changes the bed rule of a vanilla dimension type or of a biome.
+On a server it also assumes that no datapack changes the bed rule of a vanilla dimension type, of a biome or through a timeline.
 If the server refuses the bed anyway, you see the usual vanilla message and the mod tries again a second later.
 
 ## Installing
@@ -53,18 +53,21 @@ The client GameTests in `src/gametest` run these steps in order. Each step's num
 |3|`bed-in-reach`|next night, beside the red bed|sleeps straight away|
 |4|`nearest-bed`|moved closer to the blue bed|walks to the blue bed and sleeps|
 
-`BedRuleClientGameTest` checks each dimension's bed rule, first in a singleplayer world and then on a dedicated server, at midnight with a bed 8 blocks away. The test datapack in `src/gametest/resources/data/autosleep_test` adds two dimensions with a day-night cycle: `exploding_beds`, whose beds explode, and `allowed_beds`, whose beds work.
+`BedRuleClientGameTest` checks the bed rules, first in a singleplayer world and then on a dedicated server, at midnight with a bed 8 blocks away. The test datapack in `src/gametest/resources/data/autosleep_test` adds two dimensions with a day-night cycle, `exploding_beds`, whose beds explode although they allow sleep, and `allowed_beds`, whose beds work, and a biome `exploding_beds` whose beds explode.
 
 |Step|Id|Expected|
 |---|---|---|
 |5|`singleplayer-the_nether-bed`|stays put, never uses the bed|
-|6|`singleplayer-exploding_beds-bed`|stays put, never uses the bed|
-|7|`singleplayer-allowed_beds-bed`|walks to the bed and sleeps|
-|8|`singleplayer-overworld-bed`|walks to the bed and sleeps|
-|9|`dedicated-the_nether-bed`|stays put, never uses the bed|
-|10|`dedicated-exploding_beds-bed`|stays put, never uses the bed|
-|11|`dedicated-allowed_beds-bed`|stays put: the client cannot see this dimension's bed rule|
-|12|`dedicated-overworld-bed`|walks to the bed and sleeps|
+|6|`singleplayer-the_end-bed`|stays put, never uses the bed|
+|7|`singleplayer-exploding_beds-bed`|stays put, never uses the bed|
+|8|`singleplayer-allowed_beds-bed`|walks to the bed and sleeps|
+|9|`singleplayer-exploding_biome-bed`|walking to a bed in `allowed_beds`, put beside a second bed in the exploding biome: never uses the second bed|
+|10|`singleplayer-overworld-bed`|walks to the bed and sleeps, stays up after the night is skipped|
+|11|`dedicated-the_nether-bed`|stays put, never uses the bed|
+|12|`dedicated-the_end-bed`|stays put, never uses the bed|
+|13|`dedicated-exploding_beds-bed`|stays put, never uses the bed|
+|14|`dedicated-allowed_beds-bed`|stays put: the client cannot see this dimension's bed rule|
+|15|`dedicated-overworld-bed`|walks to the bed and sleeps, stays up after the night is skipped|
 
 ```shell
 ./gradlew runClientGameTest
@@ -79,6 +82,7 @@ xvfb-run -a --server-args="-screen 0 1280x720x24" \
 ```
 
 The client GameTest window is 1280x720, so it fills that screen.
+`scripts/record-client-gametest.sh` builds the mod, runs the unit tests and records the client GameTests this way with ffmpeg into `build/recording/raw.mp4`.
 
 ## Publishing
 
