@@ -5,6 +5,7 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestServerConnection;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
+import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -23,6 +24,8 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static io.github.brainage04.autosleep.ClientGameTestRecordingHud.step;
+
 /**
  * Joins a dedicated server that does not need the mod and checks that the client stays up during the day and, at night,
  * walks to the nearest bed and sleeps in it. Each case is a numbered step on the recording panel in the top-right
@@ -37,7 +40,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
     /** The server skips the night once every player has slept 100 ticks; leave room for a slow client. */
     private static final int WAKE_UP_TIMEOUT_TICKS = 600;
     /** A little before night starts, so the recording shows night falling. */
-    private static final long BEFORE_NIGHT = AutoSleeper.NIGHT_START - 100L;
+    private static final long BEFORE_NIGHT = DayNightCycleHud.NIGHT_START - 100L;
 
     /** Beds the server saw the player use: every attempt the mod makes, accepted or refused. */
     private final AtomicInteger serverBedUses = new AtomicInteger();
@@ -48,7 +51,6 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
     private BlockPos redBed;
     /** Thirteen blocks from the start, north-east; nearest to the second start. */
     private BlockPos blueBed;
-    private int stepNumber;
 
     @Override
     public void runTest(ClientGameTestContext context) {
@@ -60,9 +62,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
             return InteractionResult.PASS;
         });
 
-        Properties serverProperties = new Properties();
-        serverProperties.setProperty("simulation-distance", "5");
-        serverProperties.setProperty("view-distance", "4");
+        Properties serverProperties = GameTestServers.serverProperties();
 
         try (TestDedicatedServerContext server = context.worldBuilder().createServer(serverProperties);
              TestServerConnection ignored = server.connect()) {
@@ -137,18 +137,10 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
         context.waitFor(client -> client.player.blockPosition().equals(target), 100);
     }
 
-    /** Shows the step on the recording panel and logs it the way MinecraftModConventions' {@code showStep} does. */
-    private void step(String id, String title, String expected) {
-        stepNumber++;
-        String numberedId = stepNumber + ". " + id;
-        System.out.println("[CLIENT_GAMETEST_RECORDER] " + numberedId + " | " + title + " | " + expected);
-        ClientGameTestRecordingHud.showStep(numberedId, title, expected);
-    }
-
     private void fallAsleepIn(BlockPos bed, String when, int timeoutTicks) {
         context.waitFor(client -> client.player.isSleeping(), timeoutTicks);
         assertSleepingPos(Optional.of(bed), when);
-        long dayTime = context.computeOnClient(client -> Math.floorMod(client.level.getDayTime(), AutoSleeper.DAY_LENGTH_TICKS));
+        long dayTime = context.computeOnClient(client -> Math.floorMod(client.level.getDayTime(), SharedConstants.TICKS_PER_GAME_DAY));
         ClientGameTestRecordingHud.log("Asleep in the " + (bed.equals(redBed) ? "red" : "blue") + " bed at day time " + dayTime);
     }
 

@@ -10,7 +10,8 @@
 			"io.github.brainage04.autosleep.AutoSleepGameTestClient"
 		],
 		"fabric-client-gametest": [
-			"io.github.brainage04.autosleep.AutoSleepClientGameTest"
+			"io.github.brainage04.autosleep.AutoSleepClientGameTest",
+			"io.github.brainage04.autosleep.BedRuleClientGameTest"
 		]
 	}
 }

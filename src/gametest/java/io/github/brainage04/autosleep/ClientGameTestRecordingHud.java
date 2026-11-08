@@ -33,12 +33,25 @@ public final class ClientGameTestRecordingHud {
     private static final Object LOG_LOCK = new Object();
     private static final ArrayDeque<String> LOG_LINES = new ArrayDeque<>(MAX_LOG_LINES);
     private static volatile Step currentStep;
+    /** Steps so far across all client GameTests of the run; only the test thread counts. */
+    private static int stepNumber;
 
     private ClientGameTestRecordingHud() {
     }
 
     static void register() {
         HudElementRegistry.attachElementBefore(VanillaHudElements.SCOREBOARD, HUD_ID, ClientGameTestRecordingHud::render);
+    }
+
+    /**
+     * Starts the next numbered step: shows it on the panel and logs it the way MinecraftModConventions'
+     * {@code showStep} does, with one numbering for every client GameTest in the run.
+     */
+    static void step(String id, String title, String expected) {
+        stepNumber++;
+        String numberedId = stepNumber + ". " + id;
+        System.out.println("[CLIENT_GAMETEST_RECORDER] " + numberedId + " | " + title + " | " + expected);
+        showStep(numberedId, title, expected);
     }
 
     static void showStep(String id, String title, String subtitle) {
@@ -71,7 +84,7 @@ public final class ClientGameTestRecordingHud {
         Font font = client.font;
         int screenWidth = client.getWindow().getGuiScaledWidth();
         // Clear of the day/night panel in the top-left corner.
-        int maxWidth = Math.min(MAX_WIDTH, screenWidth - DayNightCycleHud.rightEdge(font) - SCREEN_MARGIN * 2 - PANEL_PADDING * 2);
+        int maxWidth = Math.min(MAX_WIDTH, screenWidth - DayNightCycleHud.rightEdge(client) - SCREEN_MARGIN * 2 - PANEL_PADDING * 2);
         int width = 0;
         for (HudLine line : lines) {
             width = Math.max(width, Math.min(maxWidth, font.width(line.text())));
