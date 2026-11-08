@@ -9,6 +9,7 @@ unset WAYLAND_DISPLAY
 XDG_RUNTIME_DIR=$(mktemp -d)
 export XDG_RUNTIME_DIR
 chmod 700 "$XDG_RUNTIME_DIR"
+trap 'rm -rf "$XDG_RUNTIME_DIR"' EXIT
 
 rm -rf build/recording build/run/clientGameTest/logs
 mkdir -p build/recording

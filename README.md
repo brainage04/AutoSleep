@@ -62,12 +62,14 @@ The client GameTests in `src/gametest` run these steps in order. Each step's num
 |7|`singleplayer-exploding_beds-bed`|stays put, never uses the bed|
 |8|`singleplayer-allowed_beds-bed`|walks to the bed and sleeps|
 |9|`singleplayer-exploding_biome-bed`|walking to a bed in `allowed_beds`, put beside a second bed in the exploding biome: never uses the second bed|
-|10|`singleplayer-overworld-bed`|walks to the bed and sleeps, stays up after the night is skipped|
-|11|`dedicated-the_nether-bed`|stays put, never uses the bed|
-|12|`dedicated-the_end-bed`|stays put, never uses the bed|
-|13|`dedicated-exploding_beds-bed`|stays put, never uses the bed|
-|14|`dedicated-allowed_beds-bed`|stays put: the client cannot see this dimension's bed rule|
-|15|`dedicated-overworld-bed`|walks to the bed and sleeps, stays up after the night is skipped|
+|10|`singleplayer-other_dimension-bed`|walking to the bed in `allowed_beds`, put beside the bed at the same position in `exploding_beds`: never uses it|
+|11|`singleplayer-stale_answer-bed`|walking to the bed in `allowed_beds`, out of range for 4 s while its biome becomes the exploding one, then back beside it: never uses it|
+|12|`singleplayer-overworld-bed`|walks to the bed and sleeps, stays up after the night is skipped|
+|13|`dedicated-the_nether-bed`|stays put, never uses the bed|
+|14|`dedicated-the_end-bed`|stays put, never uses the bed|
+|15|`dedicated-exploding_beds-bed`|stays put, never uses the bed|
+|16|`dedicated-allowed_beds-bed`|stays put: the client cannot see this dimension's bed rule|
+|17|`dedicated-overworld-bed`|walks to the bed and sleeps, stays up after the night is skipped|
 
 ```shell
 ./gradlew runClientGameTest
