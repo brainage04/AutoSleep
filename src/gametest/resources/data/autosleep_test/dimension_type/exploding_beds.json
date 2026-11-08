@@ -3,7 +3,7 @@
   "attributes": {
     "minecraft:gameplay/bed_rule": {
       "can_set_spawn": "never",
-      "can_sleep": "never",
+      "can_sleep": "always",
       "explodes": true
     }
   },

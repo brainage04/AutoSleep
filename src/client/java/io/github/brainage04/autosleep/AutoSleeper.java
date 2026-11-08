@@ -10,12 +10,10 @@ import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.Identifier;
-import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.attribute.BedRule;
 import net.minecraft.world.attribute.EnvironmentAttributes;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BedPart;
@@ -26,6 +24,12 @@ import org.jetbrains.annotations.Nullable;
 /**
  * Whenever the dimension's bed rule lets the player sleep, puts them to bed in the nearest bed: it walks there with
  * Baritone when the bed is out of reach, then uses it exactly as a right click would, so the server needs no mod.
+ * <p>
+ * Vanilla decides by the {@code BED_RULE} environment attribute at the bed's head: {@code BedBlock#useWithoutItem}
+ * blows the bed up when it {@code explodes()}, whatever else the rule says, and {@code ServerPlayer#startSleepInBed}
+ * refuses unless it {@code canSleep(level)}. {@code BED_RULE} is not synced to clients (it is not {@code syncable()} in
+ * {@code EnvironmentAttributes}, and the client decodes dimension types and biomes with codecs that keep only syncable
+ * attributes), so a client level always reads the default rule: sleep when dark, never explode.
  */
 public final class AutoSleeper {
     /** Ticks between two attempts, so the server is not asked every tick. */
@@ -35,8 +39,6 @@ public final class AutoSleeper {
      * the new day time only once a second, so until then the client still sees night and would get back into bed.
      */
     static final int WAKE_UP_GRACE_TICKS = 40;
-    /** How long the integrated server's answer about a bed stays good: until the attempt after the one that asked. */
-    private static final int SERVER_ANSWER_MAX_AGE_TICKS = RETRY_INTERVAL_TICKS * 2;
 
     /** How far to look for a bed: horizontally and vertically from the player's feet. */
     private static final int SEARCH_RADIUS_HORIZONTAL = 24;
@@ -49,7 +51,7 @@ public final class AutoSleeper {
     private boolean wasSleeping;
     /** The bed Baritone is walking to, or null when this class has not started a walk. */
     private @Nullable BlockPos walkingTo;
-    /** The integrated server's latest answer, written on the server thread; see {@link #maySleepIn}. */
+    /** The integrated server's answer to the last question, written on the server thread; see {@link #integratedServerAllows}. */
     private volatile @Nullable ServerAnswer serverAnswer;
 
     public void tick(Minecraft minecraft) {
@@ -63,10 +65,14 @@ public final class AutoSleeper {
 
         if (player == null || level == null || minecraft.gameMode == null) {
             walkingTo = null;
+            // Lets go of the last world's level.
+            serverAnswer = null;
             return;
         }
         if (sleeping) {
             stopWalking();
+            // An answer given before the night was skipped must not be used in the morning.
+            serverAnswer = null;
             return;
         }
         if (cooldownTicks > 0) {
@@ -75,8 +81,13 @@ public final class AutoSleeper {
         }
         cooldownTicks = RETRY_INTERVAL_TICKS;
 
+        IntegratedServer server = minecraft.getSingleplayerServer();
+        if (server == null && !remoteServerAllows(level, player.blockPosition())) {
+            stopWalking();
+            return;
+        }
         BlockPos bed = findNearestBed(level, player);
-        if (bed == null || !maySleepIn(minecraft, level, bed)) {
+        if (bed == null || server != null && !integratedServerAllows(server, level, bedHead(level, bed))) {
             stopWalking();
             return;
         }
@@ -91,46 +102,40 @@ public final class AutoSleeper {
     }
 
     /**
-     * Whether the server would let the player sleep in this bed now. Vanilla decides by the {@code BED_RULE}
-     * environment attribute at the bed's head: {@code BedBlock#useWithoutItem} blows the bed up when it
-     * {@code explodes()}, and {@code ServerPlayer#startSleepInBed} refuses unless it {@code canSleep(level)}.
-     * <p>
-     * {@code BED_RULE} is not synced to clients (it is not {@code syncable()} in {@code EnvironmentAttributes}, and the
-     * client decodes dimension types and biomes with codecs that keep only syncable attributes), so the client level
-     * always reads the default rule: sleep when dark, never explode. In singleplayer and on a LAN host the integrated
-     * server has the real rule; it is asked on its own thread, and its answer is used at the next attempt.
+     * In singleplayer and on a LAN host the integrated server has the real rule. It is asked on its own thread, and the
+     * answer is used at the next attempt if it was about the same bed in the same level.
      */
-    private boolean maySleepIn(Minecraft minecraft, ClientLevel level, BlockPos bed) {
-        BlockPos head = bedHead(level, bed);
-        IntegratedServer server = minecraft.getSingleplayerServer();
-        if (server != null) {
-            ResourceKey<Level> dimension = level.dimension();
-            long now = level.getGameTime();
-            ServerAnswer answer = serverAnswer;
-            server.execute(() -> serverAnswer = askServer(server, dimension, head, now));
-            return answer != null && answer.dimension().equals(dimension) && answer.head().equals(head)
-                    && now - answer.askedAt() <= SERVER_ANSWER_MAX_AGE_TICKS && answer.maySleep();
-        }
+    private boolean integratedServerAllows(IntegratedServer server, ClientLevel level, BlockPos head) {
+        Question question = new Question(level, head);
+        ServerAnswer answer = serverAnswer;
+        server.execute(() -> serverAnswer = askServer(server, question));
+        return answer != null && answer.question().equals(question) && answer.maySleep();
+    }
 
-        // vanilla-identity: on a remote server the client cannot see BED_RULE (see above), so it can only rely on the
-        // rule of a vanilla dimension type, as long as the server's datapacks leave it alone: the Nether and the End have
-        // fixed time, so the default rule never lets anyone sleep there. Any other dimension type may make beds explode.
+    /** Runs on the integrated server's thread; a stopped server runs it in place, so it refuses there. */
+    private static ServerAnswer askServer(IntegratedServer server, Question question) {
+        ServerLevel level = server.isSameThread() ? server.getLevel(question.level().dimension()) : null;
+        boolean maySleep = false;
+        if (level != null) {
+            BedRule rule = level.environmentAttributes().getValue(EnvironmentAttributes.BED_RULE, question.head());
+            maySleep = !rule.explodes() && rule.canSleep(level);
+        }
+        return new ServerAnswer(question, maySleep);
+    }
+
+    /**
+     * On a remote server the client sees only the default rule, the same at every position, so it is read at the
+     * player's position before looking for a bed.
+     */
+    private static boolean remoteServerAllows(ClientLevel level, BlockPos pos) {
+        // vanilla-identity: the client cannot see BED_RULE (see above), so it can only rely on the rule of a vanilla
+        // dimension type, as long as the server's datapacks leave it alone: the Nether and the End have fixed time, so
+        // the default rule never lets anyone sleep there. Any other dimension type may make beds explode.
         if (!level.dimensionTypeRegistration().is(key -> key.identifier().getNamespace().equals(Identifier.DEFAULT_NAMESPACE))) {
             return false;
         }
-        BedRule rule = level.environmentAttributes().getValue(EnvironmentAttributes.BED_RULE, head);
+        BedRule rule = level.environmentAttributes().getValue(EnvironmentAttributes.BED_RULE, pos);
         return !rule.explodes() && rule.canSleep(level);
-    }
-
-    /** Runs on the integrated server's thread. */
-    private static ServerAnswer askServer(IntegratedServer server, ResourceKey<Level> dimension, BlockPos head, long askedAt) {
-        ServerLevel level = server.getLevel(dimension);
-        boolean maySleep = false;
-        if (level != null) {
-            BedRule rule = level.environmentAttributes().getValue(EnvironmentAttributes.BED_RULE, head);
-            maySleep = !rule.explodes() && rule.canSleep(level);
-        }
-        return new ServerAnswer(dimension, head, askedAt, maySleep);
     }
 
     /** The head half of a bed, where vanilla reads the bed rule ({@code BedBlock#useWithoutItem}). */
@@ -177,7 +182,10 @@ public final class AutoSleeper {
         return BaritoneAPI.getProvider().getPrimaryBaritone();
     }
 
-    /** What the integrated server said about the bed with its head at {@code head}, asked at client game time {@code askedAt}. */
-    private record ServerAnswer(ResourceKey<Level> dimension, BlockPos head, long askedAt, boolean maySleep) {
+    /** A bed, by its head, in one client level: a new world or dimension is a new level. */
+    private record Question(ClientLevel level, BlockPos head) {
+    }
+
+    private record ServerAnswer(Question question, boolean maySleep) {
     }
 }
