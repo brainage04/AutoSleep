@@ -22,9 +22,6 @@ import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Whenever the dimension's bed rule lets the player sleep, puts them to bed in the nearest bed: it walks there with
- * Baritone when the bed is out of reach, then uses it exactly as a right click would, so the server needs no mod.
- * <p>
  * Vanilla decides by the {@code BED_RULE} environment attribute at the bed's head: {@code BedBlock#useWithoutItem}
  * blows the bed up when it {@code explodes()}, whatever else the rule says, and {@code ServerPlayer#startSleepInBed}
  * refuses unless it {@code canSleep(level)}. {@code BED_RULE} is not synced to clients (it is not {@code syncable()} in
@@ -32,7 +29,6 @@ import org.jetbrains.annotations.Nullable;
  * attributes), so a client level always reads the default rule: sleep when dark, never explode.
  */
 public final class AutoSleeper {
-    /** Ticks between two attempts, so the server is not asked every tick. */
     static final int RETRY_INTERVAL_TICKS = 20;
     /**
      * Ticks to wait after waking up. The server skips the night and wakes everyone in the same tick, but it sends
@@ -40,7 +36,6 @@ public final class AutoSleeper {
      */
     static final int WAKE_UP_GRACE_TICKS = 40;
 
-    /** How far to look for a bed: horizontally and vertically from the player's feet. */
     private static final int SEARCH_RADIUS_HORIZONTAL = 24;
     private static final int SEARCH_RADIUS_VERTICAL = 6;
     /** How far the player's feet may be from a bed block: vanilla's {@code ServerPlayer#isReachableBedBlock}. */
@@ -49,11 +44,9 @@ public final class AutoSleeper {
 
     private int cooldownTicks;
     private boolean wasSleeping;
-    /** The bed Baritone is walking to, or null when this class has not started a walk. */
     private @Nullable BlockPos walkingTo;
     /** The integrated server's latest answer, written on the server thread; see {@link #integratedServerAllows}. */
     private volatile @Nullable ServerAnswer serverAnswer;
-    /** The question the last attempt sent the integrated server, or null when it sent none. */
     private @Nullable Question lastQuestion;
 
     public void tick(Minecraft minecraft) {
@@ -67,7 +60,6 @@ public final class AutoSleeper {
 
         if (player == null || level == null || minecraft.gameMode == null) {
             walkingTo = null;
-            // Lets go of the last world's level.
             lastQuestion = null;
             serverAnswer = null;
             return;
@@ -156,7 +148,6 @@ public final class AutoSleeper {
         return state.getValue(BedBlock.PART) == BedPart.HEAD ? bed : bed.relative(state.getValue(BedBlock.FACING));
     }
 
-    /** The bed block nearest to the player's feet within the search box, either half. */
     static @Nullable BlockPos findNearestBed(ClientLevel level, LocalPlayer player) {
         BlockPos origin = player.blockPosition();
         BlockPos nearest = null;
@@ -173,7 +164,6 @@ public final class AutoSleeper {
         return nearest;
     }
 
-    /** Close enough for the server to accept the bed: vanilla's bed range and the player's block interaction range. */
     private static boolean inReach(LocalPlayer player, BlockPos bed) {
         Vec3 bottomCenter = Vec3.atBottomCenterOf(bed);
         return Math.abs(player.getX() - bottomCenter.x) <= BED_RANGE_HORIZONTAL

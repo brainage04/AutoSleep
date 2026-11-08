@@ -26,30 +26,18 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static io.github.brainage04.autosleep.ClientGameTestRecordingHud.step;
 
-/**
- * Joins a dedicated server that does not need the mod and checks that the client stays up during the day and, at night,
- * walks to the nearest bed and sleeps in it. Each case is a numbered step on the recording panel in the top-right
- * corner ({@link ClientGameTestRecordingHud}); the top-left panel shows the day time ({@link DayNightCycleHud}).
- */
 @SuppressWarnings("UnstableApiUsage")
 public class AutoSleepClientGameTest implements FabricClientGameTest {
-    /** Long enough for several of the mod's attempts. */
     private static final int AWAKE_CHECK_TICKS = AutoSleeper.RETRY_INTERVAL_TICKS * 5;
-    /** Path search and a walk of about ten blocks. */
     private static final int WALK_AND_SLEEP_TIMEOUT_TICKS = 400;
-    /** The server skips the night once every player has slept 100 ticks; leave room for a slow client. */
     private static final int WAKE_UP_TIMEOUT_TICKS = 600;
-    /** A little before night starts, so the recording shows night falling. */
     private static final long BEFORE_NIGHT = DayNightCycleHud.NIGHT_START - 100L;
 
-    /** Beds the server saw the player use: every attempt the mod makes, accepted or refused. */
     private final AtomicInteger serverBedUses = new AtomicInteger();
     private ClientGameTestContext context;
     private TestDedicatedServerContext server;
     private int y;
-    /** Nearest to the start; nine blocks south of it. */
     private BlockPos redBed;
-    /** Thirteen blocks from the start, north-east; nearest to the second start. */
     private BlockPos blueBed;
 
     @Override
@@ -130,7 +118,6 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
         server.runCommand(command);
     }
 
-    /** Puts the player at the given spot on the ground, looking south. */
     private void teleport(double x, double z) {
         command("tp @a " + x + " " + y + " " + z + " 0 30");
         BlockPos target = BlockPos.containing(x, y, z);
@@ -144,7 +131,6 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
         ClientGameTestRecordingHud.log("Asleep in the " + (bed.equals(redBed) ? "red" : "blue") + " bed at day time " + dayTime);
     }
 
-    /** Waits for the server to skip the night, then checks that the morning does not send the player back to bed. */
     private void sleepThroughTheNight() {
         // Count from before the wake-up, so an attempt sent in the very tick the player wakes is not missed.
         serverBedUses.set(0);
@@ -153,7 +139,6 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
         assertStaysAwake("after waking up in the morning");
     }
 
-    /** Watches long enough for several attempts, then checks that the player is awake and the server saw no bed use. */
     private void assertStaysAwake(String when) {
         context.waitTicks(AWAKE_CHECK_TICKS);
         assertSleepingPos(Optional.empty(), when);

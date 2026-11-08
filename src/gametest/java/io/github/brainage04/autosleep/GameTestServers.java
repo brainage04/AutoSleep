@@ -5,7 +5,6 @@ import java.io.UncheckedIOException;
 import java.net.ServerSocket;
 import java.util.Properties;
 
-/** Dedicated-server settings shared by the client GameTests. */
 final class GameTestServers {
     private GameTestServers() {
     }

@@ -11,10 +11,6 @@ import net.minecraft.resources.Identifier;
 
 import java.util.List;
 
-/**
- * Top-left panel for client GameTest recordings: the day time, the Overworld's night by the clock, the dimension, and
- * whether the client sees it as night (dark outside, which is what vanilla's default {@code when_dark} bed rule asks).
- */
 public final class DayNightCycleHud {
     private static final Identifier HUD_ID = Identifier.fromNamespaceAndPath(AutoSleep.MOD_ID, "gametest_day_night_cycle");
     private static final int SCREEN_MARGIN = 5;
@@ -39,7 +35,6 @@ public final class DayNightCycleHud {
         HudElementRegistry.attachElementBefore(VanillaHudElements.SCOREBOARD, HUD_ID, DayNightCycleHud::render);
     }
 
-    /** Where this panel ends on the right, so the step panel can keep clear of it. */
     static int rightEdge(Minecraft client) {
         int width = 0;
         for (Line line : lines(client)) {

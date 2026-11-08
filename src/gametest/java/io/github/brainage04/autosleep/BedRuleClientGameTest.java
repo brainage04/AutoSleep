@@ -33,15 +33,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static io.github.brainage04.autosleep.ClientGameTestRecordingHud.step;
 
-/**
- * Checks that the mod follows each dimension's bed rule, in singleplayer and on a dedicated server, at night with a bed
- * eight blocks away: it leaves beds alone in the Nether, the End and {@code autosleep_test:exploding_beds} (the test
- * datapack's dimension with a day-night cycle and beds that explode although they allow sleep), sleeps in the Overworld
- * and stays up after the night is skipped, and in {@code autosleep_test:allowed_beds} (a datapack dimension whose beds
- * work) sleeps in singleplayer, where the integrated server tells it the rule, but not on a dedicated server, where the
- * client cannot see that dimension type's rule. In singleplayer it also checks that the server's answer about one bed
- * is not used for another bed whose biome makes beds explode. Every case runs; the failures are listed together at the end.
- */
 @SuppressWarnings("UnstableApiUsage")
 public class BedRuleClientGameTest implements FabricClientGameTest {
     private static final ResourceKey<Level> EXPLODING_BEDS = testDimension("exploding_beds");
@@ -50,21 +41,13 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
     /** Far from the End's main island, so the dragon stays away. */
     private static final BlockPos PLAYER = new BlockPos(1000, Y, 0);
     private static final BlockPos BED_HEAD = PLAYER.offset(0, 0, 8);
-    /** A second bed, in a patch of the test datapack's biome whose beds explode. */
     private static final BlockPos OTHER_BED_HEAD = PLAYER.offset(-10, 0, 0);
-    /** In reach of the bed at {@link #BED_HEAD}: in front of its foot, facing it. */
     private static final Vec3 BESIDE_BED = new Vec3(PLAYER.getX() + 0.5D, Y, BED_HEAD.getZ() - 1.5D);
-    /** The top of the test datapack dimensions' flat ground (bedrock and three stone layers from y 0), far below the stage. */
     private static final int GROUND_Y = 4;
-    /** Several of the mod's attempts with no bed in range. */
     private static final int OUT_OF_RANGE_TICKS = AutoSleeper.RETRY_INTERVAL_TICKS * 4;
-    /** Night by the Overworld clock; time advances only in the cases that skip the night. */
     private static final long MIDNIGHT = 18000L;
-    /** Long enough for several of the mod's attempts. */
     private static final int WATCH_TICKS = AutoSleeper.RETRY_INTERVAL_TICKS * 8;
-    /** Path search and a walk of eight blocks. */
     private static final int WALK_AND_SLEEP_TIMEOUT_TICKS = 400;
-    /** The server skips the night once every player has slept 100 ticks; leave room for a slow client. */
     private static final int WAKE_UP_TIMEOUT_TICKS = 600;
 
     private final AtomicInteger serverBedUses = new AtomicInteger();
@@ -143,7 +126,6 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
             minecraftServer.overworld().getGameRules().set(GameRules.ADVANCE_TIME, expect == Expect.SLEEPS_THROUGH_THE_NIGHT, minecraftServer);
         });
         server.runCommand("time set " + MIDNIGHT);
-        // Also wakes a player still asleep from the previous case.
         teleport(server, dimension, PLAYER.getX() + 0.5D, PLAYER.getZ() + 0.5D, 0.0F);
         context.waitFor(client -> client.level != null && client.level.dimension() == dimension
                 && client.player.blockPosition().equals(PLAYER) && !client.player.isSleeping()
@@ -184,7 +166,6 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
         }
     }
 
-    /** Waits for the server to skip the night, then checks that the morning does not send the player back to bed. */
     private void stayUpAfterTheNightIsSkipped(String id) {
         // Count from before the wake-up, so an attempt sent in the very tick the player wakes is not missed.
         serverBedUses.set(0);
@@ -207,11 +188,6 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
         }
     }
 
-    /**
-     * In autosleep_test:allowed_beds the mod gets a "may sleep" answer and starts walking to the bed; the player is then
-     * put beside another bed in a biome whose beds explode, before the mod's next attempt. That answer was about the
-     * first bed, so the mod must not use the second one.
-     */
     private void checkAnswerIsNotReusedForAnotherBed(TestServerContext server) {
         String id = "singleplayer-exploding_biome-bed";
         step(id, "Walking to a bed in autosleep_test:allowed_beds, then put beside a bed in a biome whose beds explode",
@@ -241,11 +217,6 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
         expectBedLeftAlone(id, server, ALLOWED_BEDS, OTHER_BED_HEAD);
     }
 
-    /**
-     * The mod gets a "may sleep" answer for the bed in autosleep_test:allowed_beds and starts walking to it; the player is
-     * then put beside the bed at the same position in autosleep_test:exploding_beds, before the mod's next attempt. That
-     * answer was about the other dimension's bed, so the mod must not use this one.
-     */
     private void checkAnswerIsNotReusedInAnotherDimension(TestServerContext server) {
         String id = "singleplayer-other_dimension-bed";
         step(id, "Walking to a bed in autosleep_test:allowed_beds, then put beside the bed at the same position in autosleep_test:exploding_beds",
@@ -266,11 +237,6 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
         expectBedLeftAlone(id, server, EXPLODING_BEDS, BED_HEAD);
     }
 
-    /**
-     * The mod gets a "may sleep" answer for the bed in autosleep_test:allowed_beds and starts walking to it; the player is
-     * then put far below, out of range of any bed, for several attempts, while the bed's biome changes to one whose beds
-     * explode, and then back beside the bed. The old answer must not be used.
-     */
     private void checkAnswerIsNotReusedLater(TestServerContext server) {
         String id = "singleplayer-stale_answer-bed";
         step(id, "Walking to a bed in autosleep_test:allowed_beds, then out of range while its biome changes to one whose beds explode",
@@ -282,7 +248,6 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
         }
         ClientGameTestRecordingHud.log("Walking to the bed; put out of range for " + OUT_OF_RANGE_TICKS / 20 + " s");
         serverBedUses.set(0);
-        // The flat ground far below the stage: the beds are out of the mod's vertical search range there.
         teleport(server, ALLOWED_BEDS, PLAYER.getX() + 0.5D, GROUND_Y, PLAYER.getZ() + 0.5D, 0.0F);
         context.waitFor(client -> client.player.getY() < GROUND_Y + 1, 100);
         cancelWalk();
@@ -296,7 +261,6 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
         expectBedLeftAlone(id, server, ALLOWED_BEDS, BED_HEAD);
     }
 
-    /** Puts the player at the stage in autosleep_test:allowed_beds and waits until the mod starts walking to the bed. */
     private boolean startWalkingInAllowedBeds(TestServerContext server, String id) {
         teleport(server, ALLOWED_BEDS, PLAYER.getX() + 0.5D, Y, PLAYER.getZ() + 0.5D, 0.0F);
         context.waitFor(client -> client.level.dimension() == ALLOWED_BEDS && client.player.blockPosition().equals(PLAYER)
@@ -311,12 +275,10 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
         }
     }
 
-    /** Stops the walk the mod started, so the player stays where the test put them until the mod's next attempt. */
     private void cancelWalk() {
         context.runOnClient(client -> BaritoneAPI.getProvider().getPrimaryBaritone().getPathingBehavior().cancelEverything());
     }
 
-    /** Watches for several attempts, then checks that the server saw no bed use and the bed is still there. */
     private void expectBedLeftAlone(String id, TestServerContext server, ResourceKey<Level> dimension, BlockPos head) {
         context.waitTicks(WATCH_TICKS);
         int uses = serverBedUses.get();
@@ -332,7 +294,6 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
         }
     }
 
-    /** Puts the player in the dimension, looking 10 degrees down, so a bed ahead sits just below the crosshair. */
     private static void teleport(TestServerContext server, ResourceKey<Level> dimension, double x, double z, float yaw) {
         teleport(server, dimension, x, Y, z, yaw);
     }
@@ -352,7 +313,6 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
         return "beds explode here";
     }
 
-    /** Logs the bed rule each side reads at a bed's head: the client's is always the default (BED_RULE is not synced). */
     private void logRules(Mode mode, TestServerContext server, ResourceKey<Level> dimension, BlockPos head) {
         String serverRule = server.computeOnServer(minecraftServer -> {
             ServerLevel level = level(minecraftServer, dimension);
@@ -376,7 +336,6 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
         return level;
     }
 
-    /** An air box with a stone floor, the player's spot at its centre and a red bed eight blocks south. */
     private static void buildStage(ServerLevel level) {
         for (BlockPos pos : BlockPos.betweenClosed(PLAYER.offset(-12, -1, -12), PLAYER.offset(12, 4, 12))) {
             level.setBlockAndUpdate(pos, pos.getY() == Y - 1 ? Blocks.STONE.defaultBlockState() : Blocks.AIR.defaultBlockState());
@@ -384,7 +343,6 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
         placeBed(level, BED_HEAD);
     }
 
-    /** A red bed facing south, its head at {@code head}. */
     private static void placeBed(ServerLevel level, BlockPos head) {
         BlockState bed = Blocks.RED_BED.defaultBlockState().setValue(BedBlock.FACING, Direction.SOUTH);
         level.setBlockAndUpdate(head.relative(Direction.NORTH), bed.setValue(BedBlock.PART, BedPart.FOOT));
