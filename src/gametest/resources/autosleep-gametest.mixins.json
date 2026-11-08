@@ -1,0 +1,11 @@
+{
+	"required": true,
+	"package": "io.github.brainage04.autosleep.mixin",
+	"compatibilityLevel": "JAVA_21",
+	"mixins": [
+		"NetworkSynchronizerMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}
