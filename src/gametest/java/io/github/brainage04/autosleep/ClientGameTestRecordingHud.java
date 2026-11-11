@@ -45,14 +45,14 @@ public final class ClientGameTestRecordingHud {
     static void step(String id, String title, String expected) {
         stepNumber++;
         String numberedId = stepNumber + ". " + id;
-        System.out.println("[CLIENT_GAMETEST_RECORDER] " + numberedId + " | " + title + " | " + expected);
+        System.out.println("[CLIENT_GAMETEST_RECORDER] " + System.currentTimeMillis() + " " + numberedId + " | " + title + " | " + expected);
         showStep(numberedId, title, expected);
     }
 
     static void showStep(String id, String title, String subtitle) {
         Step step = new Step(clean(id), clean(title), clean(subtitle));
         currentStep = step;
-        log(step.id() + " - " + step.title());
+        addLogLine(step.id() + " - " + step.title());
     }
 
     static void log(String message) {
@@ -60,12 +60,17 @@ public final class ClientGameTestRecordingHud {
         if (cleaned.isBlank()) {
             return;
         }
+        // The epoch millis let the recording be trimmed against this log; the recorded capture starts at ffmpeg-start.
+        System.out.println("[CLIENT_GAMETEST_RECORDER] " + System.currentTimeMillis() + " - " + cleaned);
+        addLogLine(cleaned);
+    }
 
+    private static void addLogLine(String message) {
         synchronized (LOG_LOCK) {
             while (LOG_LINES.size() >= MAX_LOG_LINES) {
                 LOG_LINES.removeFirst();
             }
-            LOG_LINES.addLast(cleaned);
+            LOG_LINES.addLast(message);
         }
     }
 

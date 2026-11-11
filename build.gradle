@@ -91,8 +91,10 @@ loom {
 
 	runs {
 		matching { it.name == "clientGameTest" }.configureEach {
-			// A 720p window, so client GameTest screenshots and recordings fill a 1280x720 Xvfb screen.
-			programArgs "--width", "1280", "--height", "720"
+			// A 1080p window, so client GameTest recordings fill a 1920x1080 Xvfb screen as the other mods' do. At GUI
+			// scale 3 that is 640x360 GUI pixels: the same overlay size these recordings have always had at 1280x720
+			// and scale 2, only sharper.
+			programArgs "--width", "1920", "--height", "1080"
 			// A host whose DevAuth config enables it would otherwise wait forever for a Microsoft login.
 			vmArg "-Ddevauth.enabled=false"
 		}
@@ -124,6 +126,9 @@ tasks.named("processGametestResources") {
 }
 
 def clientGameTestRunDir = layout.buildDirectory.dir("run/clientGameTest")
+// GUI scale 3 at 1920x1080 is the same 640x360 GUI as scale 2 at 1280x720; the sound device is the recorder's sink.
+def recordingGuiScale = providers.gradleProperty("autosleepGuiScale").orElse("3")
+def recordingSoundDevice = providers.gradleProperty("autosleepSoundDevice").orElse("")
 
 // BEGIN CLIENT GAMETEST RUN SETUP
 tasks.register("prepareClientGameTestRun") {
@@ -131,6 +136,8 @@ tasks.register("prepareClientGameTestRun") {
 
 	outputs.file(optionsFile)
 	mustRunAfter(tasks.named("deleteGameTestRunDir"))
+	inputs.property("guiScale", recordingGuiScale)
+	inputs.property("soundDevice", recordingSoundDevice)
 
 	doLast {
 		def settings = [
@@ -144,7 +151,7 @@ tasks.register("prepareClientGameTestRun") {
 				entityShadows          : "false",
 				fullscreen             : "false",
 				graphicsPreset         : '"fast"',
-				guiScale               : "2",
+				guiScale               : recordingGuiScale.get(),
 				improvedTransparency   : "false",
 				joinedFirstServer      : "true",
 				maxAnisotropyBit       : "1",
@@ -158,7 +165,8 @@ tasks.register("prepareClientGameTestRun") {
 				renderClouds           : '"false"',
 				renderDistance         : "5",
 				simulationDistance     : "5",
-				soundCategory_master   : "0.0",
+				soundDevice            : recordingSoundDevice.get(),
+				soundCategory_master   : recordingSoundDevice.get().isEmpty() ? "0.0" : "1.0",
 				soundCategory_music    : "0.0",
 				toggleSprint           : "true",
 				weatherRadius         : "5"
