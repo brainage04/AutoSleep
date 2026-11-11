@@ -10,13 +10,17 @@ set -uo pipefail
 : "${FPS:=30}"
 mkdir -p "$OUT"
 
+# The video and the game's sound go to separate files. The sound is lossless: the game's mix arrives at -43 dBFS or so,
+# and the cutter normalises it, so a lossy capture would have its own codec noise pushed up with the mix. FLAC of the
+# same length is about a tenth of the raw video.
 capture=(-y -loglevel error -f x11grab -draw_mouse 0 -video_size "$SCREEN" -framerate "$FPS" -i "$DISPLAY.0")
 if [ -n "${AUDIO_SINK:-}" ]; then
-	capture+=(-f pulse -thread_queue_size 1024 -i "$AUDIO_SINK.monitor" -map 0:v:0 -map 1:a:0 -c:a aac -b:a 192k)
+	capture+=(-f pulse -thread_queue_size 1024 -i "$AUDIO_SINK.monitor"
+		-map 0:v:0 -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p "$OUT/raw.mp4"
+		-map 1:a:0 -c:a flac -compression_level 8 "$OUT/raw-audio.flac")
 else
-	capture+=(-map 0:v:0)
+	capture+=(-map 0:v:0 -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p "$OUT/raw.mp4")
 fi
-capture+=(-c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p "$OUT/raw.mp4")
 
 date +%s.%N > "$OUT/ffmpeg-start"
 ffmpeg "${capture[@]}" &

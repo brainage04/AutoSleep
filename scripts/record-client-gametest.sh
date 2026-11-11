@@ -117,8 +117,9 @@ fi
 if [ -f "$OUT/raw.mp4" ]; then
 	ffprobe -v error -show_entries stream=codec_type,width,height,r_frame_rate -show_entries format=duration \
 		-of default=noprint_wrappers=1 "$OUT/raw.mp4"
-	if [ -n "${AUDIO_SINK:-}" ]; then
-		ffmpeg -hide_banner -nostats -i "$OUT/raw.mp4" -map 0:a:0 -af astats -f null - 2>&1 \
+	if [ -n "${AUDIO_SINK:-}" ] && [ -f "$OUT/raw-audio.flac" ]; then
+		echo "Game sound: $(ffprobe -v error -show_entries stream=duration -of default=nw=1:nk=1 "$OUT/raw-audio.flac") s, lossless"
+		ffmpeg -hide_banner -nostats -i "$OUT/raw-audio.flac" -af astats -f null - 2>&1 \
 			| grep -E 'Peak level dB|RMS level dB'
 	fi
 fi

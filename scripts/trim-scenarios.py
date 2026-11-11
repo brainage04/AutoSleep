@@ -39,27 +39,29 @@ QUIET_AT_CUT_DB = -45.0
 
 
 class Segment:
-    """One clip: the step marker it starts on, the marker it ends on, and how long to hold after that."""
+    """One clip: the step marker it starts on, the markers it may end on, and how long to hold after that."""
 
-    def __init__(self, step_id: str, end_marker: str, tail: float, caption: str | None = None) -> None:
+    def __init__(self, step_id: str, end_markers: tuple[str, ...], tail: float, caption: str | None = None) -> None:
         self.step_id = step_id
-        self.end_marker = end_marker
+        self.end_markers = end_markers
         self.tail = tail
         self.caption = caption
 
 
 # Scenario 1 holds the day negative and the nightfall positive in one shot, so it is never cut in the middle of the
 # point it makes and the viewer sees the walk reach the bed.
+# A clip ends on the first of its end markers that the log has after its step marker. The alternatives are there because
+# the in-reach step reports the use and the red-bed sleeps report the bed, and either line proves the same moment.
 SEGMENTS = [
-    Segment("1. daytime", "Asleep in the red bed", 0.55,
+    Segment("1. daytime", ("Asleep in the red bed",), 0.55,
             "Day, the red bed 4.5 blocks away: nothing happens. Night falls: it walks at once and sleeps."),
-    Segment("2. bed-in-reach-day", "Nothing happened for 20 ticks in reach", 0.05,
-            "Day, standing beside the red bed: nothing happens."),
-    Segment("3. bed-in-reach", "Asleep in the red bed", 0.55,
+    Segment("2. bed-in-reach-day", ("Nothing happened for 20 ticks in reach",), 0.05,
+            "Day, in reach of the red bed and looking at it: nothing happens."),
+    Segment("3. bed-in-reach", ("The bed was used", "Asleep in the red bed"), 0.55,
             "Night, beside the red bed and facing away: it looks at the bed and uses it in one tick."),
-    Segment("4. nearest-bed", "Asleep in the blue bed", 0.55,
+    Segment("4. nearest-bed", ("Asleep in the blue bed",), 0.55,
             "Night, two beds in view, the blue one nearer: it walks to the blue bed."),
-    Segment("5. nearest-bed-red", "Asleep in the red bed", 0.55,
+    Segment("5. nearest-bed-red", ("Asleep in the red bed",), 0.55,
             "Night, the same two beds, the red one nearer: it walks to the red bed."),
 ]
 
@@ -76,11 +78,11 @@ def read_markers(log_path: str, start: float) -> list[tuple[float, str]]:
     return markers
 
 
-def index_after(markers: list[tuple[float, str]], text: str, after: int) -> int:
+def index_after(markers: list[tuple[float, str]], texts: tuple[str, ...], after: int) -> int:
     for index in range(after, len(markers)):
-        if text in markers[index][1]:
+        if any(text in markers[index][1] for text in texts):
             return index
-    sys.exit(f"no marker containing {text!r} after marker {after}")
+    sys.exit(f"no marker containing any of {texts!r} after marker {after}")
 
 
 def peak_db(raw: str, start: float, length: float) -> float:
@@ -95,16 +97,16 @@ def peak_db(raw: str, start: float, length: float) -> float:
     return float(match.group(1)) if match.group(1) != "-inf" else float("-inf")
 
 
-def build_graph(cuts: list[tuple[str, float, float, str, str]], audio: bool) -> tuple[str, str]:
+def build_graph(cuts: list[tuple[str, float, float, str, str]], audio_input: int | None) -> tuple[str, str]:
     """Per-cut filters (trim before the cut, reset timestamps, fade in and out) and the concat inputs."""
     parts = []
     joined = []
     for index, (_, start, end, _, _) in enumerate(cuts):
         length = end - start
         parts.append(f"[0:v]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS[v{index}]")
-        if audio:
+        if audio_input is not None:
             parts.append(
-                f"[0:a]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS,"
+                f"[{audio_input}:a]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS,"
                 f"afade=t=in:st=0:d={FADE_SECONDS},"
                 f"afade=t=out:st={max(length - FADE_SECONDS, 0.0):.3f}:d={FADE_SECONDS}[a{index}]")
             joined.append(f"[v{index}][a{index}]")
@@ -113,12 +115,12 @@ def build_graph(cuts: list[tuple[str, float, float, str, str]], audio: bool) -> 
     return ";".join(parts), "".join(joined)
 
 
-def measure_loudness(raw: str, graph: str, joined: str, count: int) -> dict:
+def measure_loudness(command: list[str], graph: str, joined: str, count: int) -> dict:
     """Pass one: the joined track's loudness, measured before any gain is applied."""
     filters = (f"{graph};{joined}concat=n={count}:v=1:a=1[v][plain];"
                f"[plain]loudnorm=I={LOUDNESS_TARGET}:TP={TRUE_PEAK_CEILING}:print_format=json[measured]")
     result = subprocess.run(
-        ["ffmpeg", "-hide_banner", "-nostats", "-i", raw, "-filter_complex", filters,
+        command[:1] + ["-hide_banner", "-nostats"] + command[1:] + ["-filter_complex", filters,
          "-map", "[v]", "-map", "[measured]", "-f", "null", "-"],
         capture_output=True, text=True)
     match = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", result.stderr, re.DOTALL)
@@ -133,7 +135,9 @@ def main() -> None:
     parser.add_argument("--log", required=True)
     parser.add_argument("--start", required=True)
     parser.add_argument("--out", required=True)
-    parser.add_argument("--audio", action="store_true", help="the raw file has a game sound track to cut with the video")
+    parser.add_argument("--audio", action="store_true", help="cut the game sound along with the video")
+    parser.add_argument("--audio-file", default="raw-audio.flac",
+                        help="the lossless game sound recorded beside the raw video")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -144,8 +148,8 @@ def main() -> None:
     cuts = []
     begin_index = 0
     for segment in SEGMENTS:
-        start_index = index_after(markers, segment.step_id, begin_index)
-        end_index = index_after(markers, segment.end_marker, start_index)
+        start_index = index_after(markers, (segment.step_id,), begin_index)
+        end_index = index_after(markers, segment.end_markers, start_index)
         start = markers[start_index][0] + LEAD
         end = markers[end_index][0] + segment.tail
         cuts.append((segment.step_id, start, end, markers[start_index][1], markers[end_index][1]))
@@ -164,8 +168,8 @@ def main() -> None:
 
     if args.audio:
         for step_id, start, end, _, _ in cuts:
-            before = peak_db(args.raw, start - 0.12, 0.12)
-            after = peak_db(args.raw, end + 0.02, 0.12)
+            before = peak_db(args.audio_file, start - 0.12, 0.12)
+            after = peak_db(args.audio_file, end + 0.02, 0.12)
             print(f"{step_id}: audio either side of the cut {before:.1f} dBFS / {after:.1f} dBFS")
             if before > QUIET_AT_CUT_DB or after > QUIET_AT_CUT_DB:
                 sys.exit(f"{step_id} would cut through a sound; move its boundaries to a quiet moment")
@@ -174,9 +178,13 @@ def main() -> None:
         return
 
     command = ["ffmpeg", "-y", "-loglevel", "error", "-i", args.raw]
-    graph, joined = build_graph(cuts, args.audio)
+    audio_input = None
     if args.audio:
-        measured = measure_loudness(args.raw, graph, joined, len(cuts))
+        command += ["-i", args.audio_file]
+        audio_input = 1
+    graph, joined = build_graph(cuts, audio_input)
+    if args.audio:
+        measured = measure_loudness(command, graph, joined, len(cuts))
         input_i = float(measured["input_i"])
         if input_i < -70.0:
             sys.exit("the cut audio is silent: nothing to normalise")
