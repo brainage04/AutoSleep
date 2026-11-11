@@ -37,6 +37,8 @@ public final class AutoSleeper {
     static final int WAKE_UP_GRACE_TICKS = 40;
     /** Steps of {@link BedLook#DEGREES_PER_TICK} one turn may take before the attempt is given up: a full turn and more. */
     static final int TURN_TIMEOUT_TICKS = 20;
+    /** Ticks the crosshair stays on the bed before it is clicked: a player looks, then right-clicks. */
+    static final int LOOK_TICKS = 3;
 
     private static final int SEARCH_RADIUS_HORIZONTAL = 24;
     private static final int SEARCH_RADIUS_VERTICAL = 6;
@@ -50,6 +52,7 @@ public final class AutoSleeper {
     /** The bed the mod is turning toward: it uses the bed on the tick the crosshair lands on it. */
     private @Nullable BlockPos turningTo;
     private int turnTicks;
+    private int lookedTicks;
     /** The integrated server's latest answer, written on the server thread; see {@link #integratedServerAllows}. */
     private volatile @Nullable ServerAnswer serverAnswer;
     private @Nullable Question lastQuestion;
@@ -118,6 +121,7 @@ public final class AutoSleeper {
             stopWalking();
             turningTo = bed;
             turnTicks = 0;
+            lookedTicks = 0;
             if (aimAndUse(minecraft, player, level, bed) != Aim.TURNING) {
                 turningTo = null;
             }
@@ -128,13 +132,14 @@ public final class AutoSleeper {
     }
 
     /**
-     * Turns the view one step toward the bed and uses it on the tick the vanilla crosshair lands on it, so the player
-     * only ever uses a bed they are looking at, from vanilla reach. The hit result is the game's own pick, exactly what
-     * a right click would send.
+     * Turns the view one step toward the bed and uses it once the vanilla crosshair has been on it for
+     * {@link #LOOK_TICKS} ticks, so the player only ever uses a bed they are looking at, from vanilla reach. The hit
+     * result is the game's own pick, exactly what a right click would send.
      */
     private Aim aimAndUse(Minecraft minecraft, LocalPlayer player, ClientLevel level, BlockPos bed) {
         if (++turnTicks > TURN_TIMEOUT_TICKS || !(level.getBlockState(bed).getBlock() instanceof BedBlock)
                 || !inReach(player, bed)) {
+            lookedTicks = 0;
             return Aim.ABANDONED;
         }
         Vec3 eye = player.getEyePosition();
@@ -144,8 +149,13 @@ public final class AutoSleeper {
 
         HitResult hit = player.raycastHitResult(1.0F, player);
         if (!(hit instanceof BlockHitResult blockHit) || !sameBed(level, blockHit.getBlockPos(), bed)) {
+            lookedTicks = 0;
             return Aim.TURNING;
         }
+        if (++lookedTicks < LOOK_TICKS) {
+            return Aim.TURNING;
+        }
+        lookedTicks = 0;
         minecraft.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, blockHit);
         return Aim.USED;
     }

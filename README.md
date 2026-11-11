@@ -14,7 +14,7 @@ Servers do not send that rule to clients, so the mod gets it like this:
 - **On a server, in a vanilla dimension type** (`minecraft:...`): it uses vanilla's default rule, sleep when dark outside. The Nether and the End have no night, so beds there are never used.
 - **On a server, in any other dimension type:** it never uses a bed, because that dimension's beds may explode and the client cannot tell.
 
-If you may sleep in the bed and it is in reach (vanilla's 3 blocks horizontally and 2 vertically, and your block interaction range), the mod turns you to face the bed, 20 degrees a tick, and right-clicks it once the game's crosshair is on the bed.
+If you may sleep in the bed and it is in reach (vanilla's 3 blocks horizontally and 2 vertically, and your block interaction range), the mod turns you to face the bed, 20 degrees a tick, and right-clicks it once the game's crosshair has been on the bed for a moment.
 The bed is only ever used that way: the mod asks the game for the crosshair target itself, so it uses the bed only when you are looking at it and it is within your block interaction range, exactly as when you right-click it yourself.
 Otherwise [Baritone](https://github.com/cabaletta/baritone) walks you next to it first; Baritone is bundled in the mod's jar and is set never to break or place blocks on the way.
 
