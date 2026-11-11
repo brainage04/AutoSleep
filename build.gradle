@@ -91,12 +91,15 @@ loom {
 
 	runs {
 		matching { it.name == "clientGameTest" }.configureEach {
-			// A 1080p window, so client GameTest recordings fill a 1920x1080 Xvfb screen as the other mods' do. At GUI
+			// A 1080p window, so client GameTest recordings fill a 1920x1080 screen as the other mods' do. At GUI
 			// scale 3 that is 640x360 GUI pixels: the same overlay size these recordings have always had at 1280x720
 			// and scale 2, only sharper.
 			programArgs "--width", "1920", "--height", "1080"
 			// A host whose DevAuth config enables it would otherwise wait forever for a Microsoft login.
 			vmArg "-Ddevauth.enabled=false"
+			// A take on the GPU display fails unless the client draws with the card: a silent fallback to software
+			// rendering would be a slow recording that looks like a GPU one.
+			vmArg "-Dautosleep.requireNvidia=" + (providers.gradleProperty("autosleepRequireNvidia").getOrElse("false"))
 		}
 	}
 }

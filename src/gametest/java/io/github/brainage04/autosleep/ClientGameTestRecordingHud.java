@@ -80,25 +80,33 @@ public final class ClientGameTestRecordingHud {
             return;
         }
 
-        List<HudLine> lines = lines();
         Font font = client.font;
         int screenWidth = client.getWindow().getGuiScaledWidth();
         int maxWidth = Math.min(MAX_WIDTH, screenWidth - DayNightCycleHud.rightEdge(client) - SCREEN_MARGIN * 2 - PANEL_PADDING * 2);
-        int width = 0;
-        for (HudLine line : lines) {
-            width = Math.max(width, Math.min(maxWidth, font.width(line.text())));
+        // Long lines wrap instead of ending in an ellipsis: a caption that is cut off tells the viewer nothing.
+        List<String> texts = new ArrayList<>();
+        List<Integer> colors = new ArrayList<>();
+        for (HudLine line : lines()) {
+            for (String piece : wrap(font, line.text(), maxWidth)) {
+                texts.add(piece);
+                colors.add(line.color());
+            }
         }
 
+        int width = 0;
+        for (String text : texts) {
+            width = Math.max(width, font.width(text));
+        }
         int lineHeight = font.lineHeight + LINE_GAP;
         int panelWidth = width + PANEL_PADDING * 2;
-        int panelHeight = lines.size() * lineHeight + PANEL_PADDING * 2 - LINE_GAP;
+        int panelHeight = texts.size() * lineHeight + PANEL_PADDING * 2 - LINE_GAP;
         int panelX = screenWidth - panelWidth - SCREEN_MARGIN;
         int panelY = SCREEN_MARGIN;
         graphics.fill(panelX, panelY, panelX + panelWidth, panelY + panelHeight, BACKGROUND_COLOR);
 
         int textY = panelY + PANEL_PADDING;
-        for (HudLine line : lines) {
-            graphics.drawString(font, fit(font, line.text(), maxWidth), panelX + PANEL_PADDING, textY, line.color(), true);
+        for (int index = 0; index < texts.size(); index++) {
+            graphics.drawString(font, texts.get(index), panelX + PANEL_PADDING, textY, colors.get(index), true);
             textY += lineHeight;
         }
     }
@@ -122,6 +130,27 @@ public final class ClientGameTestRecordingHud {
             }
         }
         return lines;
+    }
+
+    private static List<String> wrap(Font font, String text, int maxWidth) {
+        List<String> wrapped = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        for (String word : text.split(" ")) {
+            String candidate = current.length() == 0 ? word : current + " " + word;
+            if (current.length() > 0 && font.width(candidate) > maxWidth) {
+                wrapped.add(current.toString());
+                current.setLength(0);
+            }
+            current.append(current.length() == 0 ? word : " " + word);
+        }
+        if (current.length() > 0) {
+            wrapped.add(current.toString());
+        }
+        if (wrapped.isEmpty()) {
+            wrapped.add("");
+        }
+        wrapped.replaceAll(line -> fit(font, line, maxWidth));
+        return wrapped;
     }
 
     private static String fit(Font font, String text, int maxWidth) {

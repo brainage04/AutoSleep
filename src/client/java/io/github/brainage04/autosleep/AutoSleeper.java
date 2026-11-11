@@ -35,10 +35,8 @@ public final class AutoSleeper {
      * the new day time only once a second, so until then the client still sees night and would get back into bed.
      */
     static final int WAKE_UP_GRACE_TICKS = 40;
-    /** Steps of {@link BedLook#DEGREES_PER_TICK} one turn may take before the attempt is given up: a full turn and more. */
-    static final int TURN_TIMEOUT_TICKS = 20;
-    /** Ticks the crosshair stays on the bed before it is clicked: a player looks, then right-clicks. */
-    static final int LOOK_TICKS = 3;
+    /** Ticks before a look that missed the bed is tried again: the bed itself has not moved. */
+    static final int MISSED_LOOK_RETRY_TICKS = 2;
 
     private static final int SEARCH_RADIUS_HORIZONTAL = 24;
     private static final int SEARCH_RADIUS_VERTICAL = 6;
@@ -48,11 +46,11 @@ public final class AutoSleeper {
 
     private int cooldownTicks;
     private boolean wasSleeping;
+    /** Whether the last tick's answer to "would the game let me sleep here" was yes. */
+    private boolean maySleepHere;
     private @Nullable BlockPos walkingTo;
-    /** The bed the mod is turning toward: it uses the bed on the tick the crosshair lands on it. */
-    private @Nullable BlockPos turningTo;
-    private int turnTicks;
-    private int lookedTicks;
+    /** Whether the walk this mod started has already been noticed as finished. */
+    private boolean walkEnded;
     /** The integrated server's latest answer, written on the server thread; see {@link #integratedServerAllows}. */
     private volatile @Nullable ServerAnswer serverAnswer;
     private @Nullable Question lastQuestion;
@@ -68,29 +66,49 @@ public final class AutoSleeper {
 
         if (player == null || level == null || minecraft.gameMode == null) {
             walkingTo = null;
-            turningTo = null;
             lastQuestion = null;
             serverAnswer = null;
+            maySleepHere = false;
             return;
         }
         if (sleeping) {
             stopWalking();
-            turningTo = null;
             // Nothing asked before the night was skipped may be used in the morning.
             lastQuestion = null;
+            // The player is in bed, so the game let them sleep: waking up in a stale night must not look like nightfall
+            // and must not cut the wake-up grace short.
+            maySleepHere = true;
             return;
         }
-        // Turning to the bed is this mod's mouse look: it moves every tick, where finding a bed is retried once a second.
-        if (turningTo != null) {
-            Aim aim = aimAndUse(minecraft, player, level, turningTo);
-            if (aim == Aim.TURNING) {
-                return;
+
+        // Read every tick, because the answer changes with the time of day, and the client's day time is exact: the
+        // walk starts on the first tick the game would let the player sleep, not on the next retry.
+        IntegratedServer server = minecraft.getSingleplayerServer();
+        boolean allowedNow = server != null
+                ? clientRuleAllows(level, player.blockPosition())
+                : remoteServerAllows(level, player.blockPosition());
+        if (allowedNow && !maySleepHere) {
+            // Night has just fallen, or a datapack's rule has just changed: act on this tick, not a second later.
+            cooldownTicks = 0;
+        }
+        maySleepHere = allowedNow;
+        if (allowedNow) {
+            boolean walkActive = baritone().getCustomGoalProcess().isActive();
+            if (walkingTo != null && !walkActive && !walkEnded) {
+                walkEnded = true;
+                // The walk has just stopped: if it stopped beside the bed, use it on this tick rather than standing
+                // next to it until the next retry.
+                if (inReach(player, walkingTo)) {
+                    cooldownTicks = 0;
+                }
             }
-            turningTo = null;
-            if (aim == Aim.USED) {
-                cooldownTicks = RETRY_INTERVAL_TICKS;
-                return;
+        }
+        if (!allowedNow) {
+            stopWalking();
+            if (cooldownTicks > 0) {
+                cooldownTicks--;
             }
+            return;
         }
         if (cooldownTicks > 0) {
             cooldownTicks--;
@@ -105,11 +123,6 @@ public final class AutoSleeper {
         lastQuestion = null;
         serverAnswer = null;
 
-        IntegratedServer server = minecraft.getSingleplayerServer();
-        if (server == null && !remoteServerAllows(level, player.blockPosition())) {
-            stopWalking();
-            return;
-        }
         BlockPos bed = findNearestBed(level, player);
         if (bed == null || server != null
                 && !integratedServerAllows(server, new Question(level, bedHead(level, bed)), previousQuestion, previousAnswer)) {
@@ -119,43 +132,38 @@ public final class AutoSleeper {
 
         if (inReach(player, bed)) {
             stopWalking();
-            turningTo = bed;
-            turnTicks = 0;
-            lookedTicks = 0;
-            if (aimAndUse(minecraft, player, level, bed) != Aim.TURNING) {
-                turningTo = null;
+            if (lookAndUse(minecraft, player, level, bed) == Aim.MISSED) {
+                cooldownTicks = MISSED_LOOK_RETRY_TICKS;
             }
         } else if (!bed.equals(walkingTo) || !baritone().getCustomGoalProcess().isActive()) {
             walkingTo = bed;
+            walkEnded = false;
             baritone().getCustomGoalProcess().setGoalAndPath(new GoalGetToBlock(bed));
         }
     }
 
     /**
-     * Turns the view one step toward the bed and uses it once the vanilla crosshair has been on it for
-     * {@link #LOOK_TICKS} ticks, so the player only ever uses a bed they are looking at, from vanilla reach. The hit
-     * result is the game's own pick, exactly what a right click would send.
+     * Puts the view on the bed and uses it on the same tick, so no time is spent between walking there and lying down.
+     * The hit result is the game's own pick, so the bed is only used when the crosshair is on it, from vanilla reach.
      */
-    private Aim aimAndUse(Minecraft minecraft, LocalPlayer player, ClientLevel level, BlockPos bed) {
-        if (++turnTicks > TURN_TIMEOUT_TICKS || !(level.getBlockState(bed).getBlock() instanceof BedBlock)
-                || !inReach(player, bed)) {
-            lookedTicks = 0;
-            return Aim.ABANDONED;
+    private Aim lookAndUse(Minecraft minecraft, LocalPlayer player, ClientLevel level, BlockPos bed) {
+        if (!(level.getBlockState(bed).getBlock() instanceof BedBlock) || !inReach(player, bed)) {
+            return Aim.GONE;
         }
         Vec3 eye = player.getEyePosition();
         Vec3 target = Vec3.atCenterOf(bed);
-        player.setYRot(BedLook.stepYaw(player.getYRot(), BedLook.yawTo(eye, target)));
-        player.setXRot(BedLook.stepPitch(player.getXRot(), BedLook.pitchTo(eye, target)));
+        float yaw = BedLook.normalizeYaw(BedLook.yawTo(eye, target));
+        float pitch = BedLook.pitchTo(eye, target);
+        // Both the rotation and the one the renderer interpolates from, so the view is on the bed in one frame.
+        player.setYRot(yaw);
+        player.setXRot(pitch);
+        player.yRotO = yaw;
+        player.xRotO = pitch;
 
         HitResult hit = player.raycastHitResult(1.0F, player);
         if (!(hit instanceof BlockHitResult blockHit) || !sameBed(level, blockHit.getBlockPos(), bed)) {
-            lookedTicks = 0;
-            return Aim.TURNING;
+            return Aim.MISSED;
         }
-        if (++lookedTicks < LOOK_TICKS) {
-            return Aim.TURNING;
-        }
-        lookedTicks = 0;
         minecraft.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, blockHit);
         return Aim.USED;
     }
@@ -190,6 +198,12 @@ public final class AutoSleeper {
         return new ServerAnswer(question, maySleep);
     }
 
+    /** The rule the client can read at a position: the default one everywhere a remote server has not sent it. */
+    private static boolean clientRuleAllows(ClientLevel level, BlockPos pos) {
+        BedRule rule = level.environmentAttributes().getValue(EnvironmentAttributes.BED_RULE, pos);
+        return !rule.explodes() && rule.canSleep(level);
+    }
+
     /**
      * On a remote server the client sees only the default rule, the same at every position, so it is read at the
      * player's position before looking for a bed.
@@ -201,8 +215,7 @@ public final class AutoSleeper {
         if (!level.dimensionTypeRegistration().is(key -> key.identifier().getNamespace().equals(Identifier.DEFAULT_NAMESPACE))) {
             return false;
         }
-        BedRule rule = level.environmentAttributes().getValue(EnvironmentAttributes.BED_RULE, pos);
-        return !rule.explodes() && rule.canSleep(level);
+        return clientRuleAllows(level, pos);
     }
 
     /** The head half of a bed, where vanilla reads the bed rule ({@code BedBlock#useWithoutItem}). */
@@ -255,13 +268,13 @@ public final class AutoSleeper {
     private record ServerAnswer(Question question, boolean maySleep) {
     }
 
-    /** What one tick of turning toward a bed did. */
+    /** What one tick of looking at a bed did. */
     private enum Aim {
-        /** Still turning: the crosshair is not on the bed yet. */
-        TURNING,
         /** The bed was used with the crosshair on it. */
         USED,
-        /** The bed is gone, is out of reach, or the turn took too long: this attempt is over. */
-        ABANDONED
+        /** The crosshair did not land on the bed: nothing was used. */
+        MISSED,
+        /** The bed is gone or out of reach: this attempt is over. */
+        GONE
     }
 }

@@ -47,3 +47,7 @@ replay_*.log
 
 # nomad-heavy / heavy job lock
 .gametest.lock
+
+# Python bytecode from the recording scripts
+__pycache__/
+*.pyc

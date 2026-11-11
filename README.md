@@ -6,7 +6,7 @@ It uses the bed for you exactly as a right click would, so it works on any serve
 
 ## How it works
 
-Once per second while you are awake, the mod finds the nearest bed within 24 blocks horizontally and 6 vertically and asks whether the server would let you sleep in it now.
+While you are awake, the mod asks every tick whether the game would let you sleep in a bed here, and finds the nearest bed within 24 blocks horizontally and 6 vertically.
 Vanilla decides that by the dimension's bed rule (the `gameplay/bed_rule` environment attribute at the bed): whether beds explode, and whether you can sleep always, never or only when it is dark outside.
 Servers do not send that rule to clients, so the mod gets it like this:
 
@@ -14,9 +14,9 @@ Servers do not send that rule to clients, so the mod gets it like this:
 - **On a server, in a vanilla dimension type** (`minecraft:...`): it uses vanilla's default rule, sleep when dark outside. The Nether and the End have no night, so beds there are never used.
 - **On a server, in any other dimension type:** it never uses a bed, because that dimension's beds may explode and the client cannot tell.
 
-If you may sleep in the bed and it is in reach (vanilla's 3 blocks horizontally and 2 vertically, and your block interaction range), the mod turns you to face the bed, 20 degrees a tick, and right-clicks it once the game's crosshair has been on the bed for a moment.
+If you may sleep in the bed and it is in reach (vanilla's 3 blocks horizontally and 2 vertically, and your block interaction range), the mod puts your view on the bed and right-clicks it on that same tick: it does not walk the view round, and it does not wait before using the bed.
 The bed is only ever used that way: the mod asks the game for the crosshair target itself, so it uses the bed only when you are looking at it and it is within your block interaction range, exactly as when you right-click it yourself.
-Otherwise [Baritone](https://github.com/cabaletta/baritone) walks you next to it first; Baritone is bundled in the mod's jar and is set never to break or place blocks on the way.
+Otherwise [Baritone](https://github.com/cabaletta/baritone) walks you next to it first, and the walk starts on the same tick the game first lets you sleep rather than at the next retry. Baritone is bundled in the mod's jar and is set never to break or place blocks on the way.
 
 After waking up the mod waits two seconds, because the server sends the new day time only once a second and the morning would otherwise still look like night.
 
@@ -45,14 +45,15 @@ runs the Fabric-aware metadata tests and the `BedLook` turn tests in `src/test/j
 
 The client GameTests in `src/gametest` run these steps in order. Each step's number and id show in the recording panel in the top-right corner (a 1.21.11 port of MinecraftModConventions' recording HUD), and the log has a `[CLIENT_GAMETEST_RECORDER]` line for it. The top-left panel shows the day time out of 24000, the Overworld's night by the clock, the dimension, and whether the client sees it as night.
 
-`AutoSleepClientGameTest` starts a dedicated server without the mod, joins it and places a red and a blue bed out of reach of the player:
+`AutoSleepClientGameTest` starts a dedicated server without the mod, joins it and places a red and a blue bed ten blocks apart, out of reach of the player. Every positive case has its negative beside it:
 
 |Step|Id|Situation|Expected|
 |---|---|---|---|
-|1|`daytime`|daytime, the red bed two blocks out of reach; half a second in, the time is set to ten ticks before night|stays put and awake until night falls, then starts walking to the bed|
-|2|`nightfall-walks-to-bed`|night, the red bed two blocks out of reach|walks the two blocks and sleeps in the red bed, looking at it; stays up after the night is skipped|
-|3|`bed-in-reach`|next night, beside the red bed but facing away from it|turns to the bed, then sleeps in it|
-|4|`nearest-bed`|moved closer to the blue bed, both out of reach|walks to the blue bed and sleeps in it|
+|1|`daytime`|daytime, the red bed four and a half blocks away; half a second in, the time is set to ten ticks before night|does nothing, does not even turn, until night falls; then starts walking within two ticks, reaches the bed, looks at it and sleeps|
+|2|`bed-in-reach-day`|daytime, standing beside the red bed|does nothing and does not turn, although the bed is in reach|
+|3|`bed-in-reach`|night, beside the red bed and facing away|looks at the bed and uses it in one tick, then sleeps|
+|4|`nearest-bed`|night, both beds on camera, the blue bed nearer|walks to the blue bed, not the red one, and sleeps|
+|5|`nearest-bed-red`|night, the same two beds, the red bed nearer|walks to the red bed instead, and sleeps|
 
 Every bed use is checked through a `UseBlockCallback` handler on the client, where the mod made the decision: the game's crosshair target must be that bed, the player's eye must be within the vanilla 4.5-block block interaction range of it, and neither interaction range may have been modified.
 A use that fails any of those, or any use while the player is out of reach of the bed, fails the test.
@@ -79,7 +80,7 @@ A use that fails any of those, or any use while the player is out of reach of th
 ./gradlew runClientGameTest
 ```
 
-On a headless Linux machine, run it under Xvfb:
+On a headless Linux machine without a GPU display, run it under Xvfb:
 
 ```shell
 ALSOFT_DRIVERS=null LIBGL_ALWAYS_SOFTWARE=1 \
@@ -90,9 +91,11 @@ xvfb-run -a --server-args="-screen 0 1920x1080x24" \
 The client GameTest window is 1920x1080 at GUI scale 3, so it fills that screen with the same 640x360 GUI pixels these recordings have always shown.
 
 `scripts/record-client-gametest.sh` builds the mod, runs the unit tests and records the client GameTests the same way into `build/recording/raw.mp4`.
+On a host with a GPU display for recordings, name it in `AUTOSLEEP_RECORDING_DISPLAY` (`:1`) or in `/etc/gametest-recording-display` (`:1 NVIDIA`): the run then draws on that display, holds it under `/tmp/.gtr-recording-display-1.lock` for the whole take, and fails unless the client reports an NVIDIA renderer.
 When a PulseAudio server is reachable it also records the game's sound: the game plays into a private null sink named `autosleep_recording_<timestamp>`, ffmpeg records that sink's monitor, and the sink is removed afterwards, so the desktop's own output is never touched.
 Without one (or with `AUTOSLEEP_RECORDING_AUDIO=off`) it records video only and says so.
-Every step and observation the test makes prints a `[CLIENT_GAMETEST_RECORDER] <epoch millis>` line into the game log; with `ffmpeg-start` (the capture's epoch) those lines date each scenario in the recording, which is how the four scenarios are cut out of the raw capture.
+Every step and observation the test makes prints a `[CLIENT_GAMETEST_RECORDER] <epoch millis>` line into the game log; with `ffmpeg-start` (the capture's epoch) those lines date each scenario in the recording.
+`scripts/trim-scenarios.py` cuts the scenarios out of the raw capture on those lines, fades every cut for 30 ms, and normalises the game's sound by loudness (two-pass loudnorm to -16 LUFS, -1.5 dBFS true peak) instead of applying a fixed gain; `scripts/finalize-recording.sh` runs the cut, writes the sidecar beside the video and measures the result.
 
 ## Publishing
 

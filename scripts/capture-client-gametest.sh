@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Runs the client GameTests inside the X display xvfb-run gives this script and records that display with ffmpeg, with
-# the game's sound when AUDIO_SINK names a PulseAudio sink whose monitor carries it. Called by
-# scripts/record-client-gametest.sh from the repository root; not for direct use.
+# Records the client GameTests from the X display this script is given: the GPU display when the parent script picked
+# one, otherwise the Xvfb screen it runs the game on. The game's sound is recorded too when AUDIO_SINK names a
+# PulseAudio sink whose monitor carries it. Called by scripts/record-client-gametest.sh from the repository root; not for
+# direct use.
 set -uo pipefail
 
 : "${OUT:?OUT must be the recording directory}"
