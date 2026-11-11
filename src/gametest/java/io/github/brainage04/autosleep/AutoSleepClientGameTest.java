@@ -47,11 +47,12 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
      * blocks, and out of reach, so a bed use from here would be the negative case.
      */
     private static final double TWO_BLOCKS_BEYOND_REACH_Z = 4.5D;
-    /** The bed is north of the player here, so a player facing south has to turn to it. */
-    private static final float FACING_SOUTH = 0.0F;
-    private static final float FACING_NORTH = 180.0F;
+    /** The red bed is south of the start position, at larger Z: looking at it is yaw 0, looking away is yaw 180. */
+    private static final float TOWARD_THE_RED_BED = 0.0F;
+    private static final float AWAY_FROM_THE_RED_BED = 180.0F;
 
     private final AtomicInteger serverBedUses = new AtomicInteger();
+    private final AtomicInteger clientBedUses = new AtomicInteger();
     private final AtomicReference<String> unplayableBedUse = new AtomicReference<>();
     private ClientGameTestContext context;
     private TestDedicatedServerContext server;
@@ -67,6 +68,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
                 return InteractionResult.PASS;
             }
             if (level.isClientSide() && player instanceof LocalPlayer localPlayer) {
+                clientBedUses.incrementAndGet();
                 String problem = unplayableUse(localPlayer, hitResult);
                 if (problem != null) {
                     unplayableBedUse.compareAndSet(null, problem);
@@ -99,7 +101,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
             command("gamemode survival @a");
             command("weather clear");
             command("time set day");
-            teleport(0.5D, TWO_BLOCKS_BEYOND_REACH_Z, FACING_NORTH);
+            teleport(0.5D, TWO_BLOCKS_BEYOND_REACH_Z, TOWARD_THE_RED_BED);
             context.waitFor(client -> client.level.getBlockState(blueBed).getBlock() instanceof BedBlock, 200);
             context.runOnClient(client -> {
                 if (!AutoSleepClient.isInitialized()) {
@@ -109,6 +111,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
 
             step("daytime", "Daytime, the red bed two blocks out of reach", "Nothing happens until night falls");
             serverBedUses.set(0);
+            clientBedUses.set(0);
             Vec3 dayStart = context.computeOnClient(client -> client.player.position());
             assertStaysAwake("during the day", DAY_CHECK_TICKS);
             double moved = context.computeOnClient(client -> client.player.position().distanceTo(dayStart));
@@ -121,17 +124,19 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
             context.waitTicks(10);
 
             step("nightfall-walks-to-bed", "Night falls, the red bed two blocks out of reach", "Walks the two blocks, then uses the bed looking at it");
-            teleport(0.5D, TWO_BLOCKS_BEYOND_REACH_Z, FACING_NORTH);
+            teleport(0.5D, TWO_BLOCKS_BEYOND_REACH_Z, TOWARD_THE_RED_BED);
             command("time set night");
             serverBedUses.set(0);
+            clientBedUses.set(0);
             assertOutOfReach("before walking");
             fallAsleepIn(redBed, "when night falls", WALK_AND_SLEEP_TIMEOUT_TICKS);
             sleepThroughTheNight();
 
             step("bed-in-reach", "Next night, beside the red bed but facing away", "Turns to the bed, then uses it");
-            teleport(0.5D, 7.0D, FACING_SOUTH);
+            teleport(0.5D, 7.0D, AWAY_FROM_THE_RED_BED);
             command("time set night");
             serverBedUses.set(0);
+            clientBedUses.set(0);
             fallAsleepIn(redBed, "with the bed in reach", AutoSleeper.RETRY_INTERVAL_TICKS * 3);
             sleepThroughTheNight();
 
@@ -139,6 +144,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
             teleport(6.5D, 0.5D, -139.4F);
             command("time set night");
             serverBedUses.set(0);
+            clientBedUses.set(0);
             assertOutOfReach("before walking to the blue bed");
             fallAsleepIn(blueBed, "when the blue bed is nearest", WALK_AND_SLEEP_TIMEOUT_TICKS);
             sleepThroughTheNight();
@@ -216,8 +222,13 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
         context.waitFor(client -> client.player.isSleeping(), timeoutTicks);
         assertSleepingPos(Optional.of(bed), when);
         assertNoUnplayableUse();
+        int clientUses = clientBedUses.get();
+        if (clientUses == 0) {
+            throw new AssertionError("The client never ran a bed use " + when + ", so the look-at-bed and reach rules were not checked.");
+        }
         long dayTime = context.computeOnClient(client -> Math.floorMod(client.level.getDayTime(), SharedConstants.TICKS_PER_GAME_DAY));
-        ClientGameTestRecordingHud.log("Asleep in the " + (bed.equals(redBed) ? "red" : "blue") + " bed at day time " + dayTime);
+        ClientGameTestRecordingHud.log("Asleep in the " + (bed.equals(redBed) ? "red" : "blue") + " bed at day time "
+                + dayTime + ", after " + clientUses + " client and " + serverBedUses.get() + " server bed use(s)");
     }
 
     private void assertNoUnplayableUse() {
@@ -230,6 +241,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
     private void sleepThroughTheNight() {
         // Count from before the wake-up, so an attempt sent in the very tick the player wakes is not missed.
         serverBedUses.set(0);
+        clientBedUses.set(0);
         context.waitFor(client -> !client.player.isSleeping(), WAKE_UP_TIMEOUT_TICKS);
         ClientGameTestRecordingHud.log("Woke up: the night was skipped");
         assertStaysAwake("after waking up in the morning", AWAKE_CHECK_TICKS);
