@@ -35,12 +35,7 @@ fi
 
 audio_module=""
 lock_fd=""
-stop_audio_sink() {
-	if [ -n "$audio_module" ]; then
-		pactl unload-module "$audio_module" >/dev/null 2>&1
-	fi
-}
-trap stop_audio_sink EXIT
+trap 'if [ -n "$audio_module" ]; then pactl unload-module "$audio_module" >/dev/null 2>&1; fi' EXIT
 
 rm -rf "$OUT" build/run/clientGameTest/logs
 mkdir -p "$OUT"
@@ -61,7 +56,7 @@ if [ -n "$display" ]; then
 
 	if command -v glxinfo >/dev/null 2>&1; then
 		renderer=$(glxinfo -B | sed -n 's/^[[:space:]]*OpenGL renderer string:[[:space:]]*//p' | head -1)
-		if [ -z "$renderer" ] || [ "${renderer#*$expected_renderer}" = "$renderer" ]; then
+		if [ -z "$renderer" ] || [ "${renderer#*"$expected_renderer"}" = "$renderer" ]; then
 			echo "The display ${display} does not draw with ${expected_renderer} (renderer: ${renderer:-none})." >&2
 			exit 1
 		fi
