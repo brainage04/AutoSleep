@@ -17,6 +17,10 @@ public final class AutoSleepGameTestClient implements ClientModInitializer {
 
         ClientGameTestRecordingHud.register();
         DayNightCycleHud.register();
-        ClientTickEvents.END_CLIENT_TICK.register(client -> client.getToastManager().clear());
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            client.getToastManager().clear();
+            // Baritone's settings warning and vanilla's "Respawn point set" land in chat; the panel says what happened.
+            client.gui.getChat().clearMessages(false);
+        });
     }
 }
