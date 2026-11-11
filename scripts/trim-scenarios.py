@@ -28,8 +28,12 @@ MARKER = re.compile(r"\[CLIENT_GAMETEST_RECORDER\] (\d{13}) (.*)$")
 # result the caption promises.
 LEAD = 0.10
 FADE_SECONDS = 0.03
-LOUDNESS_TARGET = -16.0
-TRUE_PEAK_CEILING = -1.5
+# These clips carry nothing but footsteps: no music, no voice, and vanilla plays no sound at all when a bed is used, so
+# the mix is sparse and about 40 dB below a normal programme. Normalising such a track to a streaming target of -16 LUFS
+# would push every footstep onto the true-peak ceiling, which is the loud, limited sound the owner called fried. -20
+# LUFS with a -3 dBFS ceiling keeps the footsteps well under full scale and leaves the transients their shape.
+LOUDNESS_TARGET = -20.0
+TRUE_PEAK_CEILING = -3.0
 LOUDNESS_RANGE = 7.0
 QUIET_AT_CUT_DB = -45.0
 
@@ -49,7 +53,7 @@ class Segment:
 SEGMENTS = [
     Segment("1. daytime", "Asleep in the red bed", 0.55,
             "Day, the red bed 4.5 blocks away: nothing happens. Night falls: it walks at once and sleeps."),
-    Segment("2. bed-in-reach-day", "Nothing happened for 20 ticks in reach", 0.30,
+    Segment("2. bed-in-reach-day", "Nothing happened for 20 ticks in reach", 0.05,
             "Day, standing beside the red bed: nothing happens."),
     Segment("3. bed-in-reach", "Asleep in the red bed", 0.55,
             "Night, beside the red bed and facing away: it looks at the bed and uses it in one tick."),
@@ -146,6 +150,11 @@ def main() -> None:
         end = markers[end_index][0] + segment.tail
         cuts.append((segment.step_id, start, end, markers[start_index][1], markers[end_index][1]))
         begin_index = end_index
+
+    for index in range(1, len(cuts)):
+        if cuts[index][1] < cuts[index - 1][2]:
+            sys.exit(f"{cuts[index][0]} starts at {cuts[index][1]:.2f}s, before {cuts[index - 1][0]} ends at"
+                     f" {cuts[index - 1][2]:.2f}s: the clips would overlap, so one of the markers or tails is wrong")
 
     total = 0.0
     for step_id, start, end, begin_text, end_text in cuts:

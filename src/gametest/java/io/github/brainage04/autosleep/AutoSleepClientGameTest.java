@@ -31,6 +31,8 @@ import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.lwjgl.opengl.GL11;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -161,6 +163,8 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
 
             step("bed-in-reach", "Night, beside the red bed and facing away.",
                     "It looks at the bed and uses it in one tick.");
+            // Still daylight: the caption is readable for half a second before the action, which then takes one tick.
+            context.waitTicks(10);
             command("time set night");
             serverBedUses.set(0);
             clientBedUses.set(0);
@@ -180,8 +184,10 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
 
             step("nearest-bed", "Night, two beds in view: the blue bed is nearer.",
                     "It walks to the blue bed, looks at it and sleeps.");
-            teleport(9.0D, 1.0D, yawBetweenTheBeds());
-            assertBothBedsInView("before walking to the blue bed");
+            teleport(9.0D, 1.0D, TOWARD_THE_RED_BED);
+            faceBetweenTheBeds();
+            assertBothBedsInView("before the walk to the blue bed");
+            context.waitTicks(5);
             command("time set night");
             serverBedUses.set(0);
             clientBedUses.set(0);
@@ -191,8 +197,10 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
 
             step("nearest-bed-red", "Night, the same two beds: the red bed is nearer.",
                     "It walks to the red bed instead, looks at it and sleeps.");
-            teleport(2.0D, 1.0D, yawBetweenTheBeds());
-            assertBothBedsInView("before walking to the red bed");
+            teleport(2.0D, 1.0D, TOWARD_THE_RED_BED);
+            faceBetweenTheBeds();
+            assertBothBedsInView("before the walk to the red bed");
+            context.waitTicks(5);
             command("time set night");
             serverBedUses.set(0);
             clientBedUses.set(0);
@@ -211,38 +219,46 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
         level.setBlockAndUpdate(head, state.setValue(BedBlock.PART, BedPart.HEAD));
     }
 
-    /** The yaw that puts both beds in the middle of the view: the short way round between them, half each side. */
-    private float yawBetweenTheBeds() {
-        return context.computeOnClient(client -> {
+    /**
+     * Turns the view so both beds sit in the middle of it, half each side: the yaw between them, the short way round.
+     * Called after the position teleport, because the turn is measured from where the player now stands.
+     */
+    private void faceBetweenTheBeds() {
+        float yaw = context.computeOnClient(client -> {
             Vec3 eye = client.player.getEyePosition();
             float toRed = BedLook.yawTo(eye, Vec3.atCenterOf(redBed));
             float toBlue = BedLook.yawTo(eye, Vec3.atCenterOf(blueBed));
             return BedLook.normalizeYaw(toRed + Mth.wrapDegrees(toBlue - toRed) / 2.0F);
         });
+        command("tp @a ~ ~ ~ " + yaw + " " + LOOK_DOWN_AT_THE_FLOOR);
+        context.waitFor(client -> Math.abs(Mth.wrapDegrees(client.player.getYRot() - yaw)) < 1.0F, 40);
     }
 
     /**
-     * A bed is on camera when its middle is inside the view and nothing stands between the eye and it. The recording is
-     * checked against the same fact frame by frame.
+     * Both beds are on camera when every corner of both halves of each is inside the view and the middle is not
+     * hidden. The corners matter: a bed that is half out of the frame is not "on screen".
      */
     private void assertBothBedsInView(String when) {
         for (BlockPos bed : new BlockPos[]{redBed, blueBed}) {
             String problem = context.computeOnClient(client -> {
                 LocalPlayer player = client.player;
                 Vec3 eye = player.getEyePosition();
-                Vec3 middle = Vec3.atCenterOf(bed);
                 double verticalFov = client.options.fov().get();
                 double halfHorizontalFov = Math.toDegrees(Math.atan(Math.tan(Math.toRadians(verticalFov) / 2.0D)
                         * (double) client.getWindow().getWidth() / client.getWindow().getHeight()));
-                double yawOff = Math.abs(Mth.wrapDegrees(BedLook.yawTo(eye, middle) - player.getYRot()));
-                double pitchOff = Math.abs(BedLook.pitchTo(eye, middle) - player.getXRot());
-                if (yawOff > halfHorizontalFov) {
-                    return "the bed at " + bed + " is " + Math.round(yawOff) + " degrees to the side of a view that is "
-                            + Math.round(halfHorizontalFov * 2.0D) + " degrees wide";
+                for (Vec3 corner : bedCorners(client.level, bed)) {
+                    double yawOff = Math.abs(Mth.wrapDegrees(BedLook.yawTo(eye, corner) - player.getYRot()));
+                    double pitchOff = Math.abs(BedLook.pitchTo(eye, corner) - player.getXRot());
+                    if (yawOff > halfHorizontalFov) {
+                        return "a corner of the bed at " + bed + " is " + Math.round(yawOff) + " degrees to the side of"
+                                + " a view that is " + Math.round(halfHorizontalFov * 2.0D) + " degrees wide";
+                    }
+                    if (pitchOff > verticalFov / 2.0D) {
+                        return "a corner of the bed at " + bed + " is " + Math.round(pitchOff) + " degrees above or"
+                                + " below the view";
+                    }
                 }
-                if (pitchOff > verticalFov / 2.0D) {
-                    return "the bed at " + bed + " is " + Math.round(pitchOff) + " degrees above or below the view";
-                }
+                Vec3 middle = Vec3.atCenterOf(bed);
                 HitResult hit = client.level.clip(new ClipContext(eye, middle, ClipContext.Block.OUTLINE,
                         ClipContext.Fluid.NONE, player));
                 if (!(hit instanceof BlockHitResult blockHit) || hit.getType() == HitResult.Type.MISS
@@ -252,10 +268,29 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
                 return null;
             });
             if (problem != null) {
-                throw new AssertionError("Expected both beds on camera " + when + ", but " + problem + ".");
+                throw new AssertionError("Expected both beds fully on camera " + when + ", but " + problem + ".");
             }
         }
         ClientGameTestRecordingHud.log("Both beds on camera " + when);
+    }
+
+    /** The eight corners of each half of a bed: the block footprint's corners at its base and at its top. */
+    private static List<Vec3> bedCorners(Level level, BlockPos bed) {
+        BlockState state = level.getBlockState(bed);
+        BlockPos other = state.getValue(BedBlock.PART) == BedPart.HEAD
+                ? bed.relative(state.getValue(BedBlock.FACING).getOpposite())
+                : bed.relative(state.getValue(BedBlock.FACING));
+        List<Vec3> corners = new ArrayList<>();
+        for (BlockPos block : new BlockPos[]{bed, other}) {
+            for (double x = 0.0D; x <= 1.0D; x += 1.0D) {
+                for (double z = 0.0D; z <= 1.0D; z += 1.0D) {
+                    for (double y = 0.0D; y <= 0.5625D; y += 0.5625D) {
+                        corners.add(new Vec3(block.getX() + x, block.getY() + y, block.getZ() + z));
+                    }
+                }
+            }
+        }
+        return corners;
     }
 
     private boolean hasBaritoneGoal() {
