@@ -60,12 +60,15 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
      * bed is short enough to show at once.
      */
     private static final double RED_BED_FOUR_AND_A_HALF_BLOCKS_AWAY_Z = 2.5D;
-    /** Beside the red bed, one and a half blocks north of its foot, so the bed is behind the player. */
+    /** In reach of the red bed and looking straight at it: three blocks north of its foot, inside the reach box. */
+    private static final double IN_REACH_FACING_THE_RED_BED_Z = 4.8D;
+    /** Beside the red bed, one block north of its foot, so the bed is behind the player. */
     private static final double BESIDE_THE_RED_BED_Z = 6.0D;
     /** The red bed is south of the start position, at larger Z: looking at it is yaw 0, looking away is yaw 180. */
     private static final float TOWARD_THE_RED_BED = 0.0F;
     private static final float AWAY_FROM_THE_RED_BED = 180.0F;
     private static final float LOOK_DOWN_AT_THE_FLOOR = 12.0F;
+    private static final float LOOK_DOWN_AT_THE_BED = 22.0F;
 
     private final AtomicInteger serverBedUses = new AtomicInteger();
     private final AtomicInteger clientBedUses = new AtomicInteger();
@@ -152,17 +155,18 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
             fallAsleepIn(redBed, "when night falls", WALK_AND_SLEEP_TIMEOUT_TICKS);
             sleepThroughTheNight();
 
-            step("bed-in-reach-day", "Day, standing beside the red bed.",
-                    "The bed is in reach, and still nothing happens.");
+            step("bed-in-reach-day", "Day, in reach of the red bed and looking at it.",
+                    "Nothing happens, although the bed is right there.");
             command("time set day");
-            teleport(0.5D, BESIDE_THE_RED_BED_Z, AWAY_FROM_THE_RED_BED);
+            teleport(0.5D, IN_REACH_FACING_THE_RED_BED_Z, TOWARD_THE_RED_BED, LOOK_DOWN_AT_THE_BED);
             serverBedUses.set(0);
             clientBedUses.set(0);
-            assertInReach("by day beside the red bed");
+            assertInReach("by day, looking at the red bed");
             assertStaysStill("in reach, but out of bed by day", REACH_CHECK_TICKS);
 
             step("bed-in-reach", "Night, beside the red bed and facing away.",
                     "It looks at the bed and uses it in one tick.");
+            teleport(0.5D, BESIDE_THE_RED_BED_Z, AWAY_FROM_THE_RED_BED);
             // Still daylight: the caption is readable for half a second before the action, which then takes one tick.
             context.waitTicks(10);
             command("time set night");
@@ -184,8 +188,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
 
             step("nearest-bed", "Night, two beds in view: the blue bed is nearer.",
                     "It walks to the blue bed, looks at it and sleeps.");
-            teleport(9.0D, 1.0D, TOWARD_THE_RED_BED);
-            faceBetweenTheBeds();
+            standBetweenTheBeds(9.0D, 1.0D);
             assertBothBedsInView("before the walk to the blue bed");
             context.waitTicks(5);
             command("time set night");
@@ -197,8 +200,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
 
             step("nearest-bed-red", "Night, the same two beds: the red bed is nearer.",
                     "It walks to the red bed instead, looks at it and sleeps.");
-            teleport(2.0D, 1.0D, TOWARD_THE_RED_BED);
-            faceBetweenTheBeds();
+            standBetweenTheBeds(2.0D, 1.0D);
             assertBothBedsInView("before the walk to the red bed");
             context.waitTicks(5);
             command("time set night");
@@ -220,17 +222,20 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
     }
 
     /**
-     * Turns the view so both beds sit in the middle of it, half each side: the yaw between them, the short way round.
-     * Called after the position teleport, because the turn is measured from where the player now stands.
+     * Stands the player at a spot and turns the view so both beds sit in the middle of it, half each side: the yaw
+     * between them, the short way round. The position goes first, because the turn is measured from where the player
+     * now is; the second teleport is absolute, since relative coordinates in {@code /tp} resolve against the command
+     * source and would put the player at the world spawn instead.
      */
-    private void faceBetweenTheBeds() {
+    private void standBetweenTheBeds(double x, double z) {
+        teleport(x, z, TOWARD_THE_RED_BED);
         float yaw = context.computeOnClient(client -> {
             Vec3 eye = client.player.getEyePosition();
             float toRed = BedLook.yawTo(eye, Vec3.atCenterOf(redBed));
             float toBlue = BedLook.yawTo(eye, Vec3.atCenterOf(blueBed));
             return BedLook.normalizeYaw(toRed + Mth.wrapDegrees(toBlue - toRed) / 2.0F);
         });
-        command("tp @a ~ ~ ~ " + yaw + " " + LOOK_DOWN_AT_THE_FLOOR);
+        command("tp @a " + x + " " + y + " " + z + " " + yaw + " " + LOOK_DOWN_AT_THE_FLOOR);
         context.waitFor(client -> Math.abs(Mth.wrapDegrees(client.player.getYRot() - yaw)) < 1.0F, 40);
     }
 
@@ -268,7 +273,9 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
                 return null;
             });
             if (problem != null) {
-                throw new AssertionError("Expected both beds fully on camera " + when + ", but " + problem + ".");
+                String view = context.computeOnClient(client -> " (player at " + client.player.position()
+                        + ", looking " + client.player.getYRot() + "/" + client.player.getXRot() + ")");
+                throw new AssertionError("Expected both beds fully on camera " + when + ", but " + problem + view + ".");
             }
         }
         ClientGameTestRecordingHud.log("Both beds on camera " + when);
@@ -343,14 +350,18 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
     }
 
     private void teleport(double x, double z, float yaw) {
-        command("tp @a " + x + " " + y + " " + z + " " + yaw + " " + LOOK_DOWN_AT_THE_FLOOR);
+        teleport(x, z, yaw, LOOK_DOWN_AT_THE_FLOOR);
+    }
+
+    private void teleport(double x, double z, float yaw, float pitch) {
+        command("tp @a " + x + " " + y + " " + z + " " + yaw + " " + pitch);
         BlockPos target = BlockPos.containing(x, y, z);
         context.waitFor(client -> client.player.blockPosition().equals(target), 100);
     }
 
     private void assertOutOfReach(String when) {
         boolean outOfReach = context.computeOnClient(client ->
-                !AutoSleeper.inReach(client.player, redBed) && !AutoSleeper.inReach(client.player, blueBed));
+                !inReachOfEitherHalf(client.player, redBed) && !inReachOfEitherHalf(client.player, blueBed));
         if (!outOfReach) {
             throw new AssertionError("Expected the player to be out of reach of both beds " + when + ".");
         }
@@ -358,11 +369,17 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
     }
 
     private void assertInReach(String when) {
-        boolean inReach = context.computeOnClient(client -> AutoSleeper.inReach(client.player, redBed));
+        boolean inReach = context.computeOnClient(client -> inReachOfEitherHalf(client.player, redBed));
         if (!inReach) {
             throw new AssertionError("Expected the red bed to be in reach " + when + ".");
         }
         ClientGameTestRecordingHud.log("The red bed is in reach " + when);
+    }
+
+    /** The mod measures reach to the nearer half of the bed, so the player may be in reach of the foot and not the head. */
+    private static boolean inReachOfEitherHalf(LocalPlayer player, BlockPos head) {
+        BlockPos foot = head.relative(Direction.NORTH);
+        return AutoSleeper.inReach(player, head) || AutoSleeper.inReach(player, foot);
     }
 
     private void assertStaysStill(String when, int ticks) {
