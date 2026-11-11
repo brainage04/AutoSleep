@@ -115,12 +115,16 @@ def build_graph(cuts: list[tuple[str, float, float, str, str]], audio_input: int
     return ";".join(parts), "".join(joined)
 
 
-def measure_loudness(command: list[str], graph: str, joined: str, count: int) -> dict:
-    """Pass one: the joined track's loudness, measured before any gain is applied."""
+def measure_loudness(inputs: list[str], graph: str, joined: str, count: int) -> dict:
+    """Pass one: the joined track's loudness, measured before any gain is applied.
+
+    Its own ffmpeg arguments, not the encode's: loudnorm prints the measurement at info level, and the encode runs at
+    error level.
+    """
     filters = (f"{graph};{joined}concat=n={count}:v=1:a=1[v][plain];"
                f"[plain]loudnorm=I={LOUDNESS_TARGET}:TP={TRUE_PEAK_CEILING}:print_format=json[measured]")
     result = subprocess.run(
-        command[:1] + ["-hide_banner", "-nostats"] + command[1:] + ["-filter_complex", filters,
+        ["ffmpeg", "-hide_banner", "-nostats"] + inputs + ["-filter_complex", filters,
          "-map", "[v]", "-map", "[measured]", "-f", "null", "-"],
         capture_output=True, text=True)
     match = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", result.stderr, re.DOTALL)
@@ -177,14 +181,15 @@ def main() -> None:
     if args.dry_run:
         return
 
-    command = ["ffmpeg", "-y", "-loglevel", "error", "-i", args.raw]
+    inputs = ["-i", args.raw]
     audio_input = None
     if args.audio:
-        command += ["-i", args.audio_file]
+        inputs += ["-i", args.audio_file]
         audio_input = 1
+    command = ["ffmpeg", "-y", "-loglevel", "error"] + inputs
     graph, joined = build_graph(cuts, audio_input)
     if args.audio:
-        measured = measure_loudness(command, graph, joined, len(cuts))
+        measured = measure_loudness(inputs, graph, joined, len(cuts))
         input_i = float(measured["input_i"])
         if input_i < -70.0:
             sys.exit("the cut audio is silent: nothing to normalise")
