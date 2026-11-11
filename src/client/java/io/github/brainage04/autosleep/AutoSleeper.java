@@ -8,7 +8,6 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
@@ -18,6 +17,7 @@ import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BedPart;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 
@@ -35,6 +35,8 @@ public final class AutoSleeper {
      * the new day time only once a second, so until then the client still sees night and would get back into bed.
      */
     static final int WAKE_UP_GRACE_TICKS = 40;
+    /** Steps of {@link BedLook#DEGREES_PER_TICK} one turn may take before the attempt is given up: a full turn and more. */
+    static final int TURN_TIMEOUT_TICKS = 20;
 
     private static final int SEARCH_RADIUS_HORIZONTAL = 24;
     private static final int SEARCH_RADIUS_VERTICAL = 6;
@@ -45,6 +47,9 @@ public final class AutoSleeper {
     private int cooldownTicks;
     private boolean wasSleeping;
     private @Nullable BlockPos walkingTo;
+    /** The bed the mod is turning toward: it uses the bed on the tick the crosshair lands on it. */
+    private @Nullable BlockPos turningTo;
+    private int turnTicks;
     /** The integrated server's latest answer, written on the server thread; see {@link #integratedServerAllows}. */
     private volatile @Nullable ServerAnswer serverAnswer;
     private @Nullable Question lastQuestion;
@@ -60,15 +65,29 @@ public final class AutoSleeper {
 
         if (player == null || level == null || minecraft.gameMode == null) {
             walkingTo = null;
+            turningTo = null;
             lastQuestion = null;
             serverAnswer = null;
             return;
         }
         if (sleeping) {
             stopWalking();
+            turningTo = null;
             // Nothing asked before the night was skipped may be used in the morning.
             lastQuestion = null;
             return;
+        }
+        // Turning to the bed is this mod's mouse look: it moves every tick, where finding a bed is retried once a second.
+        if (turningTo != null) {
+            Aim aim = aimAndUse(minecraft, player, level, turningTo);
+            if (aim == Aim.TURNING) {
+                return;
+            }
+            turningTo = null;
+            if (aim == Aim.USED) {
+                cooldownTicks = RETRY_INTERVAL_TICKS;
+                return;
+            }
         }
         if (cooldownTicks > 0) {
             cooldownTicks--;
@@ -97,11 +116,45 @@ public final class AutoSleeper {
 
         if (inReach(player, bed)) {
             stopWalking();
-            minecraft.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, new BlockHitResult(Vec3.atCenterOf(bed), Direction.UP, bed, false));
+            turningTo = bed;
+            turnTicks = 0;
+            if (aimAndUse(minecraft, player, level, bed) != Aim.TURNING) {
+                turningTo = null;
+            }
         } else if (!bed.equals(walkingTo) || !baritone().getCustomGoalProcess().isActive()) {
             walkingTo = bed;
             baritone().getCustomGoalProcess().setGoalAndPath(new GoalGetToBlock(bed));
         }
+    }
+
+    /**
+     * Turns the view one step toward the bed and uses it on the tick the vanilla crosshair lands on it, so the player
+     * only ever uses a bed they are looking at, from vanilla reach. The hit result is the game's own pick, exactly what
+     * a right click would send.
+     */
+    private Aim aimAndUse(Minecraft minecraft, LocalPlayer player, ClientLevel level, BlockPos bed) {
+        if (++turnTicks > TURN_TIMEOUT_TICKS || !(level.getBlockState(bed).getBlock() instanceof BedBlock)
+                || !inReach(player, bed)) {
+            return Aim.ABANDONED;
+        }
+        Vec3 eye = player.getEyePosition();
+        Vec3 target = Vec3.atCenterOf(bed);
+        player.setYRot(BedLook.stepYaw(player.getYRot(), BedLook.yawTo(eye, target)));
+        player.setXRot(BedLook.stepPitch(player.getXRot(), BedLook.pitchTo(eye, target)));
+
+        HitResult hit = player.raycastHitResult(1.0F, player);
+        if (!(hit instanceof BlockHitResult blockHit) || !sameBed(level, blockHit.getBlockPos(), bed)) {
+            return Aim.TURNING;
+        }
+        minecraft.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, blockHit);
+        return Aim.USED;
+    }
+
+    /** Either half of the same bed: vanilla lets a player use the bed from the foot as well as from the head. */
+    private static boolean sameBed(ClientLevel level, BlockPos first, BlockPos second) {
+        return level.getBlockState(first).getBlock() instanceof BedBlock
+                && level.getBlockState(second).getBlock() instanceof BedBlock
+                && bedHead(level, first).equals(bedHead(level, second));
     }
 
     /**
@@ -164,7 +217,8 @@ public final class AutoSleeper {
         return nearest;
     }
 
-    private static boolean inReach(LocalPlayer player, BlockPos bed) {
+    /** Vanilla reach to the bed: its own 3x2 block rule and the player's block interaction range. */
+    static boolean inReach(LocalPlayer player, BlockPos bed) {
         Vec3 bottomCenter = Vec3.atBottomCenterOf(bed);
         return Math.abs(player.getX() - bottomCenter.x) <= BED_RANGE_HORIZONTAL
                 && Math.abs(player.getY() - bottomCenter.y) <= BED_RANGE_VERTICAL
@@ -189,5 +243,15 @@ public final class AutoSleeper {
     }
 
     private record ServerAnswer(Question question, boolean maySleep) {
+    }
+
+    /** What one tick of turning toward a bed did. */
+    private enum Aim {
+        /** Still turning: the crosshair is not on the bed yet. */
+        TURNING,
+        /** The bed was used with the crosshair on it. */
+        USED,
+        /** The bed is gone, is out of reach, or the turn took too long: this attempt is over. */
+        ABANDONED
     }
 }
