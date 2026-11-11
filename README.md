@@ -41,7 +41,7 @@ Servers need nothing.
 ./gradlew test
 ```
 
-runs the Fabric-aware metadata tests in `src/test/java`.
+runs the Fabric-aware metadata tests and the `BedLook` turn tests in `src/test/java`.
 
 The client GameTests in `src/gametest` run these steps in order. Each step's number and id show in the recording panel in the top-right corner (a 1.21.11 port of MinecraftModConventions' recording HUD), and the log has a `[CLIENT_GAMETEST_RECORDER]` line for it. The top-left panel shows the day time out of 24000, the Overworld's night by the clock, the dimension, and whether the client sees it as night.
 
