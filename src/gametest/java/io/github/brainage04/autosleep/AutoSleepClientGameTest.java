@@ -140,6 +140,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
 
             // One shot, no cut: the negative (day, nothing) and the positive (nightfall, walk and sleep) are the same
             // setup, so the recording shows why nothing happens and then what happens when it may.
+            clearChat();
             step("daytime", "Day: the red bed 4.5 blocks away, nothing happens.",
                     "Night falls: it walks at once, then looks and sleeps.");
             assertStaysStill("during the day", DAY_CHECK_TICKS);
@@ -155,6 +156,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
             fallAsleepIn(redBed, "when night falls", WALK_AND_SLEEP_TIMEOUT_TICKS);
             sleepThroughTheNight();
 
+            clearChat();
             step("bed-in-reach-day", "Day, in reach of the red bed and looking at it.",
                     "Nothing happens, although the bed is right there.");
             command("time set day");
@@ -164,6 +166,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
             assertInReach("by day, looking at the red bed");
             assertStaysStill("in reach, but out of bed by day", REACH_CHECK_TICKS);
 
+            clearChat();
             step("bed-in-reach", "Night, beside the red bed and facing away.",
                     "It looks at the bed and uses it in one tick.");
             teleport(0.5D, BESIDE_THE_RED_BED_Z, AWAY_FROM_THE_RED_BED);
@@ -186,6 +189,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
             ClientGameTestRecordingHud.log("The bed was used " + ticksToUse + " ticks after nightfall");
             sleepThroughTheNight();
 
+            clearChat();
             step("nearest-bed", "Night, two beds in view: the blue bed is nearer.",
                     "It walks to the blue bed, looks at it and sleeps.");
             standBetweenTheBeds(9.0D, 1.0D);
@@ -198,6 +202,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
             fallAsleepIn(blueBed, "when the blue bed is nearest", WALK_AND_SLEEP_TIMEOUT_TICKS);
             sleepThroughTheNight();
 
+            clearChat();
             step("nearest-bed-red", "Night, the same two beds: the red bed is nearer.",
                     "It walks to the red bed instead, looks at it and sleeps.");
             standBetweenTheBeds(2.0D, 1.0D);
@@ -343,6 +348,14 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
     private static BlockPos bedHead(Level level, BlockPos bed) {
         BlockState state = level.getBlockState(bed);
         return state.getValue(BedBlock.PART) == BedPart.HEAD ? bed : bed.relative(state.getValue(BedBlock.FACING));
+    }
+
+    /**
+     * Empties the chat box before a scenario starts, so each clip shows only the lines its own scene earns. Called
+     * before the step marker, which the cut starts 0.10 s after, so the clear itself is never on camera.
+     */
+    private void clearChat() {
+        context.runOnClient(client -> client.gui.getChat().clearMessages(false));
     }
 
     private void command(String command) {
