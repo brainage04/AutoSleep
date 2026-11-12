@@ -1,6 +1,5 @@
 plugins {
 	id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
-	id 'maven-publish'
 }
 
 version = project.mod_version
@@ -13,7 +12,6 @@ base {
 repositories {
 	// Loom / Minecraft / Fabric
 	mavenCentral()
-	mavenLocal()
 	maven { url "https://libraries.minecraft.net" }
 	maven { url "https://maven.fabricmc.net/" }
 
@@ -203,15 +201,6 @@ jar {
 	from("LICENSE") {
 		rename { "${it}_${inputs.properties.archivesName}"}
 	}
-}
-
-publishing {
-    publications {
-        create("mavenJava", MavenPublication) {
-            artifactId = project.archives_base_name
-            from components.java
-        }
-    }
 }
 
 test {

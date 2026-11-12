@@ -21,17 +21,12 @@ jobs:
     steps:
       - name: checkout repository
         uses: actions/checkout@v5
-      - name: install workflow tools
+      - name: install shellcheck
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl jq perl ripgrep shellcheck tar
+          sudo apt-get install -y shellcheck
       - name: shellcheck scripts
-        run: |
-          scripts=(.github/scripts/*.sh)
-          if [ -f init.sh ]; then
-            scripts+=(init.sh)
-          fi
-          shellcheck "${scripts[@]}"
+        run: shellcheck scripts/*.sh
       - name: validate gradle wrapper
         uses: gradle/actions/wrapper-validation@v5
       - name: setup jdk
@@ -43,9 +38,6 @@ jobs:
         run: chmod +x ./gradlew
       - name: build
         run: ./gradlew build
-      - name: smoke test generated templates
-        if: ${{ hashFiles('init.sh') != '' }}
-        run: bash .github/scripts/smoke_template_generation.sh
       - name: store reports
         if: failure()
         uses: actions/upload-artifact@v7
