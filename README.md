@@ -45,15 +45,16 @@ runs the Fabric-aware metadata tests and the `BedLook` turn tests in `src/test/j
 
 The client GameTests in `src/gametest` run these steps in order. Each step's number and id show in the recording panel in the top-right corner (a 1.21.11 port of MinecraftModConventions' recording HUD), and the log has a `[CLIENT_GAMETEST_RECORDER]` line for it. The top-left panel shows the day time out of 24000, the Overworld's night by the clock, the dimension, and whether the client sees it as night.
 
-`AutoSleepClientGameTest` starts a dedicated server without the mod, joins it and places a red and a blue bed ten blocks apart, out of reach of the player. Every positive case has its negative beside it:
+`AutoSleepClientGameTest` starts a dedicated server without the mod, joins it and loads a saved scene, `data/autosleep_test/structure/bedroom.nbt`: an oak plank floor with a red and a blue bed ten blocks apart, out of reach of the player. Each step is one setup filmed twice: about two seconds by day, where the mod must do nothing, then nightfall on the same setup, where it must act at once.
 
-|Step|Id|Situation|Expected|
-|---|---|---|---|
-|1|`daytime`|daytime, the red bed four and a half blocks away; half a second in, the time is set to ten ticks before night|does nothing, does not even turn, until night falls; then starts walking within two ticks, reaches the bed, looks at it and sleeps|
-|2|`bed-in-reach-day`|daytime, standing beside the red bed|does nothing and does not turn, although the bed is in reach|
-|3|`bed-in-reach`|night, beside the red bed and facing away|looks at the bed and uses it in one tick, then sleeps|
-|4|`nearest-bed`|night, both beds on camera, the blue bed nearer|walks to the blue bed, not the red one, and sleeps|
-|5|`nearest-bed-red`|night, the same two beds, the red bed nearer|walks to the red bed instead, and sleeps|
+|Step|Id|Situation|By day|At nightfall|
+|---|---|---|---|---|
+|1|`out-of-reach`|the red bed four and a half blocks away|does nothing, does not even turn|starts walking within two ticks, reaches the bed, looks at it and sleeps|
+|2|`in-reach`|the red bed in reach and in view, 30 degrees beside the crosshair|does nothing, does not even turn|looks at the bed and uses it within two ticks, then sleeps|
+|3|`nearest-bed-blue`|both beds on camera, the blue bed nearer|does nothing, does not even turn|starts walking within two ticks to the blue bed, not the red one, and sleeps|
+|4|`nearest-bed-red`|the same two beds, the red bed nearer|does nothing, does not even turn|starts walking within two ticks to the red bed and sleeps|
+
+After each night the test checks the player stays up once the night is skipped.
 
 Every bed use is checked through a `UseBlockCallback` handler on the client, where the mod made the decision: the game's crosshair target must be that bed, the player's eye must be within the vanilla 4.5-block block interaction range of it, and neither interaction range may have been modified.
 A use that fails any of those, or any use while the player is out of reach of the bed, fails the test.
@@ -92,10 +93,10 @@ The client GameTest window is 1920x1080 at GUI scale 3, so it fills that screen 
 
 `scripts/record-client-gametest.sh` builds the mod, runs the unit tests and records the client GameTests the same way into `build/recording/raw.mp4`.
 On a host with a GPU display for recordings, name it in `AUTOSLEEP_RECORDING_DISPLAY` (`:1`) or in `/etc/gametest-recording-display` (`:1 NVIDIA`): the run then draws on that display, holds it under `/tmp/.gtr-recording-display-1.lock` for the whole take, and fails unless the client reports an NVIDIA renderer.
-When a PulseAudio server is reachable it also records the game's sound: the game plays into a private null sink named `autosleep_recording_<timestamp>`, ffmpeg records that sink's monitor, and the sink is removed afterwards, so the desktop's own output is never touched.
+When a PulseAudio server is reachable it also records the game's sound: the game plays into a private null sink named `autosleep_recording_<timestamp>`, ffmpeg records that sink's monitor as 32-bit float into `build/recording/raw-audio.wav`, and the sink is removed afterwards, so the desktop's own output is never touched.
 Without one (or with `AUTOSLEEP_RECORDING_AUDIO=off`) it records video only and says so.
 Every step and observation the test makes prints a `[CLIENT_GAMETEST_RECORDER] <epoch millis>` line into the game log; with `ffmpeg-start` (the capture's epoch) those lines date each scenario in the recording.
-`scripts/trim-scenarios.py` cuts the scenarios out of the raw capture on those lines, fades every cut for 30 ms, and normalises the game's sound by loudness (two-pass loudnorm to -16 LUFS, -1.5 dBFS true peak) instead of applying a fixed gain; `scripts/finalize-recording.sh` runs the cut, writes the sidecar beside the video and measures the result.
+`scripts/trim-scenarios.py` cuts the scenarios out of the raw capture on those lines, fades every cut for 30 ms, and raises the game's sound by one linear gain, the smaller of the two that reach -20 LUFS and a -2 dBFS true peak, so nothing compresses or limits it; `scripts/finalize-recording.sh` runs the cut, writes the sidecar beside the video and measures the result.
 
 ## Publishing
 

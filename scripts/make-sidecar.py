@@ -73,7 +73,8 @@ def main() -> None:
         "fps": round(fps, 2),
         "resolution": f"{video['width']}x{video['height']}",
         "audio": ("the game's own mix, recorded as 32-bit float from a private PulseAudio null sink at unity gain and "
-                  "raised by one linear gain to about -20 LUFS, with a 30 ms fade at every cut"
+                  "raised by one linear gain toward -20 LUFS, stopping at a -2 dBFS true peak, with a 30 ms fade at "
+                  "every cut"
                   if has_audio else "none"),
         "ownerAsks": args.ask,
         "repository": "AutoSleep, branch rec2 (GitHub brainage04/AutoSleep), /home/thomas/01_TM/Coding/Minecraft/AutoSleep",
