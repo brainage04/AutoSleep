@@ -5,7 +5,7 @@
 # Screen: the GPU display named by AUTOSLEEP_RECORDING_DISPLAY, or by the host file /etc/gametest-recording-display
 # ("<display> [expected-renderer]", e.g. ":1 NVIDIA"). That display is held for the whole run by an exclusive lock, and
 # the run fails unless the client really draws with the expected renderer. Without either, the game runs on a headless
-# 1920x1080 Xvfb screen as before.
+# 1920x1080 Xvfb screen.
 #
 # Sound: with a reachable PulseAudio server the game plays into a private null sink and ffmpeg records that sink's
 # monitor as well, so the recording has the game's sound; the desktop's default sink is never touched. The null sink and
@@ -13,9 +13,10 @@
 # at its true level and is normalised once, in the trim step, not by a blind gain here. Without one
 # (AUTOSLEEP_RECORDING_AUDIO=off, or no pactl) it records video only.
 #
-# Writes into build/recording: raw.mp4, ffmpeg-start and ffmpeg-end (epoch seconds, for trimming against the log),
-# audio-sink-inputs.txt (when the game's audio route was seen) and recorder-lines.txt, the game log's
-# [CLIENT_GAMETEST_RECORDER] lines, whose epoch millis date each scenario.
+# Writes into build/recording: raw.mp4, raw-audio.wav (the game's sound as 32-bit float, when there is a sink),
+# ffmpeg-start and ffmpeg-end (epoch seconds, for trimming against the log), audio-sink-inputs.txt (when the game's
+# audio route was seen) and recorder-lines.txt, the game log's [CLIENT_GAMETEST_RECORDER] lines, whose epoch millis
+# date each scenario.
 set -uo pipefail
 
 # The recording is of an X screen, whether that is the GPU display or Xvfb.
@@ -52,6 +53,7 @@ if [ -n "$display" ]; then
 	lock_fd=9
 	export DISPLAY="$display"
 	gradle_args+=(-PautosleepRequireNvidia=true)
+	export AUTOSLEEP_REQUIRE_NVIDIA=true
 	echo "Screen: GPU display ${display}, renderer must be ${expected_renderer}"
 
 	if command -v glxinfo >/dev/null 2>&1; then
@@ -112,10 +114,10 @@ fi
 if [ -f "$OUT/raw.mp4" ]; then
 	ffprobe -v error -show_entries stream=codec_type,width,height,r_frame_rate -show_entries format=duration \
 		-of default=noprint_wrappers=1 "$OUT/raw.mp4"
-	if [ -n "${AUDIO_SINK:-}" ] && [ -f "$OUT/raw-audio.flac" ]; then
-		echo "Game sound: $(ffprobe -v error -show_entries stream=duration -of default=nw=1:nk=1 "$OUT/raw-audio.flac") s, lossless"
-		ffmpeg -hide_banner -nostats -i "$OUT/raw-audio.flac" -af astats -f null - 2>&1 \
-			| grep -E 'Peak level dB|RMS level dB'
+	if [ -n "${AUDIO_SINK:-}" ] && [ -f "$OUT/raw-audio.wav" ]; then
+		echo "Game sound: $(ffprobe -v error -show_entries stream=duration,sample_fmt -of csv=p=0 "$OUT/raw-audio.wav") (32-bit float; a peak at or above 0 dB would mean the mix went over full scale)"
+		ffmpeg -hide_banner -nostats -i "$OUT/raw-audio.wav" -af astats=measure_perchannel=none -f null - 2>&1 \
+			| grep -E 'Peak level dB|RMS level dB|Bit depth'
 	fi
 fi
 

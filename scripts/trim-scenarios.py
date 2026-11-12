@@ -5,13 +5,12 @@ Every step and every observation the test makes prints one `[CLIENT_GAMETEST_REC
 the game log, and the capture began at the epoch in `ffmpeg-start`. A line therefore maps to a video timestamp, so the
 clips are cut on those markers instead of by eye.
 
-Audio. The game's mix arrives at its true level, because the capture route is at unity: the game's stream sits in the
-null sink at 0.00 dB, and a tone played into that sink is recorded back at the same level. Nothing in the route is 40 dB
-down: the mix is quiet because these scenes only ever play footsteps, whose samples peak around -21 dBFS and which
-vanilla plays at 0.15 volume (Entity#playStepSound). Gain therefore belongs here, where the final track can be measured,
-and it is a loudness normalisation, not a guessed constant: a two-pass loudnorm to -16 LUFS with a -1.5 dBFS
-true-peak ceiling. Every cut gets a 30 ms fade in and out, and each boundary is checked to fall in a quiet moment, so no
-footstep is ever chopped.
+Audio. The game's sound is recorded as the null sink's own 32-bit float samples, at unity: the game's stream sits in
+the sink at 0.00 dB. The mix is quiet because these scenes only ever play footsteps, which vanilla plays at 0.15 volume
+(Entity#playStepSound), so gain belongs here, where the final track can be measured. It is one linear gain, the smaller
+of the two that reach the loudness target and the true-peak ceiling, so nothing compresses or limits the footsteps:
+they keep the shape the game gave them. Every cut gets a 30 ms fade in and out, and each boundary is checked to fall in
+a quiet moment, so no footstep is ever chopped.
 
     trim-scenarios.py --raw RAW.mp4 --log recorder-lines.txt --start ffmpeg-start --out OUT.mp4 [--audio] [--dry-run]
 """
@@ -28,13 +27,9 @@ MARKER = re.compile(r"\[CLIENT_GAMETEST_RECORDER\] (\d{13}) (.*)$")
 # result the caption promises.
 LEAD = 0.10
 FADE_SECONDS = 0.03
-# These clips carry nothing but footsteps: no music, no voice, and vanilla plays no sound at all when a bed is used, so
-# the mix is sparse and about 40 dB below a normal programme. Normalising such a track to a streaming target of -16 LUFS
-# would push every footstep onto the true-peak ceiling, which is the loud, limited sound the owner called fried. -20
-# LUFS with a -3 dBFS ceiling keeps the footsteps well under full scale and leaves the transients their shape.
 LOUDNESS_TARGET = -20.0
-TRUE_PEAK_CEILING = -3.0
-LOUDNESS_RANGE = 7.0
+# Below the -1.5 dBFS the delivered file may reach, because the AAC encode can raise a peak by a few tenths of a dB.
+TRUE_PEAK_CEILING = -2.0
 QUIET_AT_CUT_DB = -45.0
 
 
@@ -48,21 +43,21 @@ class Segment:
         self.caption = caption
 
 
-# Scenario 1 holds the day negative and the nightfall positive in one shot, so it is never cut in the middle of the
-# point it makes and the viewer sees the walk reach the bed.
-# A clip ends on the first of its end markers that the log has after its step marker. The alternatives are there because
-# the in-reach step reports the use and the red-bed sleeps report the bed, and either line proves the same moment.
+# Each scenario is one shot: its setup by day, where the mod must do nothing, then nightfall on the same setup and what
+# the mod does. A clip ends on the first of its end markers that the log has after its step marker, and holds long
+# enough after it that the "on" half runs about as long as the "off" half.
 SEGMENTS = [
-    Segment("1. daytime", ("Asleep in the red bed",), 0.55,
-            "Day, the red bed 4.5 blocks away: nothing happens. Night falls: it walks at once and sleeps."),
-    Segment("2. bed-in-reach-day", ("Nothing happened for 20 ticks in reach",), 0.05,
-            "Day, in reach of the red bed and looking at it: nothing happens."),
-    Segment("3. bed-in-reach", ("The bed was used", "Asleep in the red bed"), 0.55,
-            "Night, beside the red bed and facing away: it looks at the bed and uses it in one tick."),
-    Segment("4. nearest-bed", ("Asleep in the blue bed",), 0.55,
-            "Night, two beds in view, the blue one nearer: it walks to the blue bed."),
-    Segment("5. nearest-bed-red", ("Asleep in the red bed",), 0.55,
-            "Night, the same two beds, the red one nearer: it walks to the red bed."),
+    Segment("1. out-of-reach", ("Asleep in the red bed",), 0.9,
+            "Day, the red bed 4.5 blocks away: nothing happens. Night falls: it walks to the bed at once and sleeps."),
+    Segment("2. in-reach", ("The bed was used",), 1.6,
+            "Day, the red bed in reach beside the crosshair: nothing happens. Night falls: it looks at the bed and"
+            " uses it in one tick."),
+    Segment("3. nearest-bed-blue", ("Asleep in the blue bed",), 0.9,
+            "Day, two beds in view, the blue one nearer: nothing happens. Night falls: it walks to the blue bed and"
+            " sleeps."),
+    Segment("4. nearest-bed-red", ("Asleep in the red bed",), 0.9,
+            "Day, the same two beds, the red one nearer: nothing happens. Night falls: it walks to the red bed and"
+            " sleeps."),
 ]
 
 
@@ -116,10 +111,10 @@ def build_graph(cuts: list[tuple[str, float, float, str, str]], audio_input: int
 
 
 def measure_loudness(inputs: list[str], graph: str, joined: str, count: int) -> dict:
-    """Pass one: the joined track's loudness, measured before any gain is applied.
+    """The joined track's integrated loudness and true peak, measured before any gain is applied.
 
     Its own ffmpeg arguments, not the encode's: loudnorm prints the measurement at info level, and the encode runs at
-    error level.
+    error level. Only its measurement is used; the gain is applied by `volume`.
     """
     filters = (f"{graph};{joined}concat=n={count}:v=1:a=1[v][plain];"
                f"[plain]loudnorm=I={LOUDNESS_TARGET}:TP={TRUE_PEAK_CEILING}:print_format=json[measured]")
@@ -140,8 +135,8 @@ def main() -> None:
     parser.add_argument("--start", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--audio", action="store_true", help="cut the game sound along with the video")
-    parser.add_argument("--audio-file", default="raw-audio.flac",
-                        help="the lossless game sound recorded beside the raw video")
+    parser.add_argument("--audio-file", default="raw-audio.wav",
+                        help="the game sound recorded beside the raw video, as 32-bit float")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -191,14 +186,13 @@ def main() -> None:
     if args.audio:
         measured = measure_loudness(inputs, graph, joined, len(cuts))
         input_i = float(measured["input_i"])
+        input_tp = float(measured["input_tp"])
         if input_i < -70.0:
             sys.exit("the cut audio is silent: nothing to normalise")
-        print(f"measured loudness {input_i} LUFS, true peak {measured['input_tp']} dBFS")
-        normalise = (f"loudnorm=I={LOUDNESS_TARGET}:TP={TRUE_PEAK_CEILING}:LRA={LOUDNESS_RANGE}:linear=true"
-                     f":measured_I={measured['input_i']}:measured_TP={measured['input_tp']}"
-                     f":measured_LRA={measured['input_lra']}:measured_thresh={measured['input_thresh']}"
-                     f":offset={measured['target_offset']}")
-        filters = f"{graph};{joined}concat=n={len(cuts)}:v=1:a=1[v][plain];[plain]{normalise}[aout]"
+        gain = min(LOUDNESS_TARGET - input_i, TRUE_PEAK_CEILING - input_tp)
+        print(f"measured loudness {input_i} LUFS, true peak {input_tp} dBFS: gain {gain:+.2f} dB, giving"
+              f" {input_i + gain:.1f} LUFS and a true peak of {input_tp + gain:.1f} dBFS")
+        filters = f"{graph};{joined}concat=n={len(cuts)}:v=1:a=1[v][plain];[plain]volume={gain:.2f}dB[aout]"
         command += ["-filter_complex", filters, "-map", "[v]", "-map", "[aout]", "-c:a", "aac", "-b:a", "192k"]
     else:
         filters = f"{graph};{joined}concat=n={len(cuts)}:v=1:a=0[v]"

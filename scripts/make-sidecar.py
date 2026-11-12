@@ -35,6 +35,7 @@ def main() -> None:
     parser.add_argument("--ask", action="append", default=[])
     parser.add_argument("--audio", action="store_true")
     parser.add_argument("--note", action="append", default=[])
+    parser.add_argument("--renderer", required=True, help="the OpenGL vendor and renderer the take's log reported")
     args = parser.parse_args()
 
     with open(args.segments, encoding="utf-8") as handle:
@@ -71,8 +72,8 @@ def main() -> None:
         "frames": frames,
         "fps": round(fps, 2),
         "resolution": f"{video['width']}x{video['height']}",
-        "audio": ("the game's own mix, recorded from a private PulseAudio null sink at unity gain and normalised by "
-                  "loudness (-16 LUFS, -1.5 dBFS true peak) with a 30 ms fade at every cut"
+        "audio": ("the game's own mix, recorded as 32-bit float from a private PulseAudio null sink at unity gain and "
+                  "raised by one linear gain to about -20 LUFS, with a 30 ms fade at every cut"
                   if has_audio else "none"),
         "ownerAsks": args.ask,
         "repository": "AutoSleep, branch rec2 (GitHub brainage04/AutoSleep), /home/thomas/01_TM/Coding/Minecraft/AutoSleep",
@@ -81,7 +82,7 @@ def main() -> None:
         "jobPeakMemory": args.peak,
         "rawRecording": args.raw,
         "guiScale": 3,
-        "renderer": "NVIDIA GeForce GTX 1070 on Xorg :1 (recording-display.service)",
+        "renderer": args.renderer,
         "scenarios": scenarios,
         "notes": args.note,
     }

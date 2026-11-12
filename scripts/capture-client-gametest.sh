@@ -10,14 +10,16 @@ set -uo pipefail
 : "${FPS:=30}"
 mkdir -p "$OUT"
 
-# The video and the game's sound go to separate files. The sound is lossless: the game's mix arrives at -43 dBFS or so,
-# and the cutter normalises it, so a lossy capture would have its own codec noise pushed up with the mix. FLAC of the
-# same length is about a tenth of the raw video.
+# The video and the game's sound go to separate files, the sound as the sink's own 32-bit float samples. Vanilla plays
+# footsteps at 0.15 volume, 20 to 40 dB below full scale, where ffmpeg's default 16-bit pulse capture keeps only a few
+# bits of them and the cutter's normalising gain then raises that grain with them; float keeps their full detail, and a
+# mix that ever went over full scale would show as samples above 1.0 instead of being cut off. The pulse input asks the
+# server for the format named by its codec (libavdevice pulse_audio_dec.c), so -c:a goes before -i.
 capture=(-y -loglevel error -f x11grab -draw_mouse 0 -video_size "$SCREEN" -framerate "$FPS" -i "$DISPLAY.0")
 if [ -n "${AUDIO_SINK:-}" ]; then
-	capture+=(-f pulse -thread_queue_size 1024 -i "$AUDIO_SINK.monitor"
+	capture+=(-f pulse -c:a pcm_f32le -thread_queue_size 1024 -i "$AUDIO_SINK.monitor"
 		-map 0:v:0 -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p "$OUT/raw.mp4"
-		-map 1:a:0 -c:a flac -compression_level 8 "$OUT/raw-audio.flac")
+		-map 1:a:0 -c:a pcm_f32le "$OUT/raw-audio.wav")
 else
 	capture+=(-map 0:v:0 -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p "$OUT/raw.mp4")
 fi
@@ -44,6 +46,9 @@ fi
 gradle_args=(-PautosleepGuiScale="${AUTOSLEEP_GUI_SCALE:-3}")
 if [ -n "${AUTOSLEEP_SOUND_DEVICE:-}" ]; then
 	gradle_args+=(-PautosleepSoundDevice="$AUTOSLEEP_SOUND_DEVICE")
+fi
+if [ "${AUTOSLEEP_REQUIRE_NVIDIA:-}" = true ]; then
+	gradle_args+=(-PautosleepRequireNvidia=true)
 fi
 
 timeout 20m ./gradlew --no-daemon runClientGameTest "${gradle_args[@]}"
