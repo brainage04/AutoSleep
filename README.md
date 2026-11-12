@@ -31,8 +31,8 @@ Servers need nothing.
 
 ## Development
 
-- Java 21 or newer.
-- `./gradlew build` builds the mod into `build/libs` and runs the unit tests.
+- JDK 25 to run Gradle. The mod itself targets Java 21.
+- `./gradlew build` builds the mod into `build/libs` and runs the unit tests. It fails on unformatted code (`./gradlew spotlessApply` fixes that), Checkstyle findings and compiler warnings.
 - `./gradlew runClient` launches a development client.
 
 ## Testing

@@ -1,5 +1,11 @@
+import io.github.brainage04.minecraftmodconventions.gradle.quality.DeprecatedGameTestApiCheck
+import io.github.brainage04.minecraftmodconventions.gradle.quality.VanillaIdentityCheck
+import io.github.brainage04.minecraftmodconventions.gradle.quality.VanillaTagIdentitiesCheck
+import io.github.brainage04.minecraftmodconventions.gradle.quality.WorldHeightCheck
+
 plugins {
 	id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
+	id 'io.github.brainage04.java-quality-conventions' version "${minecraftmodconventions_version}"
 }
 
 version = project.mod_version
@@ -12,8 +18,8 @@ base {
 repositories {
 	// Loom / Minecraft / Fabric
 	mavenCentral()
-	maven { url "https://libraries.minecraft.net" }
-	maven { url "https://maven.fabricmc.net/" }
+	maven { url = "https://libraries.minecraft.net" }
+	maven { url = "https://maven.fabricmc.net/" }
 
 	// DevAuth
 	maven { url = "https://pkgs.dev.azure.com/djtheredstoner/DevAuth/_packaging/public/maven/v1" }
@@ -111,6 +117,14 @@ fabricApi {
 		eula = true
 	}
 }
+
+// The source checks MinecraftModConventions' fabric-mod-conventions plugin registers on its mods. That plugin applies
+// the non-remapping Loom (FabricModConventionsPlugin.java:46 in 3.4.0), which cannot build 1.21.11; the checks only read
+// sources and the Minecraft jars.
+VanillaIdentityCheck.register(project)
+VanillaTagIdentitiesCheck.register(project, loom.namedMinecraftJars)
+WorldHeightCheck.register(project)
+DeprecatedGameTestApiCheck.register(project)
 
 tasks.named("processGametestResources") {
 	inputs.property "mod_id", project.properties.mod_id
