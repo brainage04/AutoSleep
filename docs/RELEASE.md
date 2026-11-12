@@ -8,5 +8,6 @@
 6. For longer release notes, put them in a file and run `git tag -a v1.0.1 -F RELEASE_NOTES.md`.
 7. Push the tag with `git push origin v1.0.1`.
 
-The release workflow reads the annotated tag message and uses it as the GitHub release body.
+The release workflow first runs `build.yml` on the tag: the strict build (`-PstrictQuality=true`) and the client GameTests. It publishes nothing unless both pass.
+It then builds the jar again with the same strict flags, reads the annotated tag message and uses it as the GitHub release body.
 If the tag has no annotation text, GitHub auto-generated release notes are used as a fallback.

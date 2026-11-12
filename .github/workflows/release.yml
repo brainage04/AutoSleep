@@ -8,7 +8,14 @@ permissions:
   contents: write
 
 jobs:
+  # The strict build and the client GameTests, exactly as on every push; nothing is published unless both pass.
+  verify:
+    uses: ./.github/workflows/build.yml
+    with:
+      require_client_gametests: true
+
   release:
+    needs: verify
     runs-on: ubuntu-24.04
     steps:
       - name: checkout repository
@@ -42,7 +49,7 @@ jobs:
           fi
 
       - name: build
-        run: ./gradlew clean build
+        run: ./gradlew clean build -PstrictQuality=true --warning-mode=fail
 
       - name: collect release artifacts
         run: |

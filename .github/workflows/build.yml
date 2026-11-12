@@ -14,6 +14,14 @@ on:
         required: false
         type: boolean
         default: true
+  # The release workflow runs this first and publishes only when it passes.
+  workflow_call:
+    inputs:
+      require_client_gametests:
+        description: Run the client GameTests whatever RUN_CLIENT_GAMETESTS says
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -57,7 +65,7 @@ jobs:
     name: client GameTests
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    if: ${{ vars.RUN_CLIENT_GAMETESTS != 'false' && (github.event_name != 'workflow_dispatch' || inputs.run_client_gametests) }}
+    if: ${{ inputs.require_client_gametests || (vars.RUN_CLIENT_GAMETESTS != 'false' && (github.event_name != 'workflow_dispatch' || inputs.run_client_gametests)) }}
     steps:
       - name: checkout repository
         uses: actions/checkout@v5
