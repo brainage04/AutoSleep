@@ -4,8 +4,9 @@ on:
     tags:
       - 'v*'
 
+# The build and the GameTests run third-party build code: only the job that publishes gets a write token.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   # The strict build and the client GameTests, exactly as on every push; nothing is published unless both pass.
@@ -17,6 +18,8 @@ jobs:
   release:
     needs: verify
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - name: checkout repository
         uses: actions/checkout@v5
