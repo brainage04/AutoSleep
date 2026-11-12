@@ -1,7 +1,7 @@
 {
 	"autosleep.message.bed_unusable": "AutoSleep could not use the bed at %s, %s, %s and leaves it alone until the next night.",
 	"autosleep.message.bed_unreachable": "AutoSleep found no way to the bed at %s, %s, %s and leaves it alone until the next night.",
-	"autosleep.message.bed_not_safe": "Gave up on the bed at %s, %s, %s after 30 seconds: monsters were nearby when you tried it.",
+	"autosleep.message.bed_not_safe": "Gave up on the bed at %s, %s, %s after 30 seconds: monsters were nearby when you tried it. AutoSleep leaves you awake in this world until the next night.",
 	"autosleep.message.stopped": "A Baritone command took over from AutoSleep: it leaves you awake until the next night.",
 	"autosleep.message.disabled": "AutoSleep is off: another Baritone jar in your mods folder, such as baritone-standalone-fabric, replaced the Baritone API that AutoSleep bundles. Remove that jar to use AutoSleep."
 }
