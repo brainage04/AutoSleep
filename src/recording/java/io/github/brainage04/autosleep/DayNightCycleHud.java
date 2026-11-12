@@ -27,7 +27,7 @@ public final class DayNightCycleHud {
      * enough for vanilla to let players sleep (the {@code sky_light_level} track of {@code
      * timeline/day.json} in 1.21.11).
      */
-    static final long NIGHT_START = 12523L;
+    public static final long NIGHT_START = 12523L;
 
     static final long NIGHT_END = 23478L;
 

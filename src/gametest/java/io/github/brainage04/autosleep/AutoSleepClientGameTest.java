@@ -3,8 +3,6 @@ package io.github.brainage04.autosleep;
 import static io.github.brainage04.autosleep.ClientGameTestRecordingHud.step;
 
 import baritone.api.BaritoneAPI;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -25,7 +23,6 @@ import net.minecraft.world.Difficulty;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Block;
@@ -40,7 +37,6 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
-import org.lwjgl.opengl.GL11;
 
 @SuppressWarnings("UnstableApiUsage")
 public class AutoSleepClientGameTest implements FabricClientGameTest {
@@ -113,21 +109,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
     @Override
     public void runTest(ClientGameTestContext context) {
         this.context = context;
-        if (Boolean.getBoolean("autosleep.requireNvidia")) {
-            String gl =
-                    context.computeOnClient(
-                            client ->
-                                    GL11.glGetString(GL11.GL_VENDOR)
-                                            + " / "
-                                            + GL11.glGetString(GL11.GL_RENDERER));
-            ClientGameTestRecordingHud.log("OpenGL: " + gl);
-            if (!gl.contains("NVIDIA")) {
-                throw new AssertionError(
-                        "Expected the recording to be drawn by NVIDIA, but the client draws with "
-                                + gl
-                                + ".");
-            }
-        }
+        Showcase.checkRenderer(context);
         UseBlockCallback.EVENT.register(
                 (player, level, hand, hitResult) -> {
                     if (!(level.getBlockState(hitResult.getBlockPos()).getBlock()
@@ -198,7 +180,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
 
             teleport(0.5D, IN_REACH_OF_THE_RED_BED_Z, BESIDE_THE_RED_BED, LOOK_DOWN_AT_THE_BED);
             assertInReach("beside the crosshair");
-            assertBedsInView("beside the crosshair", redBed);
+            Showcase.assertBedsInView(context, "beside the crosshair", redBed);
             assertCrosshairOffTheBed();
             startScenario(
                     "in-reach",
@@ -226,7 +208,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
             sleepThroughTheNight();
 
             standBetweenTheBeds(9.0D, 1.0D);
-            assertBedsInView("with the blue bed nearer", redBed, blueBed);
+            Showcase.assertBedsInView(context, "with the blue bed nearer", redBed, blueBed);
             startScenario(
                     "nearest-bed-blue",
                     "Day, two beds in view, the blue one nearer: nothing happens.",
@@ -239,7 +221,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
             sleepThroughTheNight();
 
             standBetweenTheBeds(2.0D, 1.0D);
-            assertBedsInView("with the red bed nearer", redBed, blueBed);
+            Showcase.assertBedsInView(context, "with the red bed nearer", redBed, blueBed);
             startScenario(
                     "nearest-bed-red",
                     "Day, the same two beds, the red one nearer: nothing happens.",
@@ -250,10 +232,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
             assertOutOfReach("before walking to the red bed");
             fallAsleepIn(redBed, "when the red bed is nearest", WALK_AND_SLEEP_TIMEOUT_TICKS);
             sleepThroughTheNight();
-            ClientGameTestRecordingHud.log(
-                    "Client FPS at the end of the run: "
-                            + context.computeOnClient(client -> client.getFps()));
-            context.waitTicks(40);
+            Showcase.hold(context);
         }
     }
 
@@ -308,7 +287,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
         context.waitTicks(SETTLE_TICKS);
         serverBedUses.set(0);
         clientBedUses.set(0);
-        clearChat();
+        Showcase.clearChat(context);
         step(id, title, expected);
     }
 
@@ -382,121 +361,6 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
                 client -> Math.abs(Mth.wrapDegrees(client.player.getYRot() - yaw)) < 1.0F, 40);
     }
 
-    /**
-     * A bed is on camera when every corner of both its halves is inside the view and its middle is
-     * not hidden. The corners matter: a bed that is half out of the frame is not "on screen".
-     */
-    private void assertBedsInView(String when, BlockPos... beds) {
-        for (BlockPos bed : beds) {
-            String problem =
-                    context.computeOnClient(
-                            client -> {
-                                LocalPlayer player = client.player;
-                                Vec3 eye = player.getEyePosition();
-                                double verticalFov = client.options.fov().get();
-                                double halfHorizontalFov =
-                                        Math.toDegrees(
-                                                Math.atan(
-                                                        Math.tan(Math.toRadians(verticalFov) / 2.0D)
-                                                                * (double)
-                                                                        client.getWindow()
-                                                                                .getWidth()
-                                                                / client.getWindow().getHeight()));
-                                for (Vec3 corner : bedCorners(client.level, bed)) {
-                                    double yawOff =
-                                            Math.abs(
-                                                    Mth.wrapDegrees(
-                                                            BedLook.yawTo(eye, corner)
-                                                                    - player.getYRot()));
-                                    double pitchOff =
-                                            Math.abs(
-                                                    BedLook.pitchTo(eye, corner)
-                                                            - player.getXRot());
-                                    if (yawOff > halfHorizontalFov) {
-                                        return "a corner of the bed at "
-                                                + bed
-                                                + " is "
-                                                + Math.round(yawOff)
-                                                + " degrees to the side of"
-                                                + " a view that is "
-                                                + Math.round(halfHorizontalFov * 2.0D)
-                                                + " degrees wide";
-                                    }
-                                    if (pitchOff > verticalFov / 2.0D) {
-                                        return "a corner of the bed at "
-                                                + bed
-                                                + " is "
-                                                + Math.round(pitchOff)
-                                                + " degrees above or"
-                                                + " below the view";
-                                    }
-                                }
-                                Vec3 middle = Vec3.atCenterOf(bed);
-                                HitResult hit =
-                                        client.level.clip(
-                                                new ClipContext(
-                                                        eye,
-                                                        middle,
-                                                        ClipContext.Block.OUTLINE,
-                                                        ClipContext.Fluid.NONE,
-                                                        player));
-                                if (!(hit instanceof BlockHitResult blockHit)
-                                        || hit.getType() == HitResult.Type.MISS
-                                        || !sameBed(client.level, blockHit.getBlockPos(), bed)) {
-                                    return "the bed at "
-                                            + bed
-                                            + " is hidden: the view hits "
-                                            + (hit == null ? "nothing" : hit.getType());
-                                }
-                                return null;
-                            });
-            if (problem != null) {
-                String view =
-                        context.computeOnClient(
-                                client ->
-                                        " (player at "
-                                                + client.player.position()
-                                                + ", looking "
-                                                + client.player.getYRot()
-                                                + "/"
-                                                + client.player.getXRot()
-                                                + ")");
-                throw new AssertionError(
-                        "Expected the bed fully on camera "
-                                + when
-                                + ", but "
-                                + problem
-                                + view
-                                + ".");
-            }
-        }
-        ClientGameTestRecordingHud.log(
-                (beds.length == 1 ? "The bed is" : "Both beds are") + " on camera " + when);
-    }
-
-    /**
-     * The eight corners of each half of a bed: the block footprint's corners at its base and at its
-     * top.
-     */
-    private static List<Vec3> bedCorners(Level level, BlockPos bed) {
-        BlockState state = level.getBlockState(bed);
-        BlockPos other =
-                state.getValue(BedBlock.PART) == BedPart.HEAD
-                        ? bed.relative(state.getValue(BedBlock.FACING).getOpposite())
-                        : bed.relative(state.getValue(BedBlock.FACING));
-        List<Vec3> corners = new ArrayList<>();
-        for (BlockPos block : new BlockPos[] {bed, other}) {
-            for (double x = 0.0D; x <= 1.0D; x += 1.0D) {
-                for (double z = 0.0D; z <= 1.0D; z += 1.0D) {
-                    for (double y = 0.0D; y <= 0.5625D; y += 0.5625D) {
-                        corners.add(new Vec3(block.getX() + x, block.getY() + y, block.getZ() + z));
-                    }
-                }
-            }
-        }
-        return corners;
-    }
-
     private boolean hasBaritoneGoal() {
         return BaritoneAPI.getProvider().getPrimaryBaritone().getCustomGoalProcess().isActive();
     }
@@ -559,15 +423,6 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
         return state.getValue(BedBlock.PART) == BedPart.HEAD
                 ? bed
                 : bed.relative(state.getValue(BedBlock.FACING));
-    }
-
-    /**
-     * Empties the chat box before a scenario starts, so each clip shows only the lines its own
-     * scene earns. Called before the step marker, which the cut starts 0.10 s after, so the clear
-     * itself is never on camera.
-     */
-    private void clearChat() {
-        context.runOnClient(client -> client.gui.getChat().clearMessages(false));
     }
 
     private void command(String command) {

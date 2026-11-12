@@ -10,7 +10,7 @@
 	],
 	"entrypoints": {
 		"client": [
-			"io.github.brainage04.autosleep.AutoSleepGameTestClient"
+			"io.github.brainage04.autosleep.AutoSleepRecordingClient"
 		],
 		"fabric-client-gametest": [
 			"io.github.brainage04.autosleep.AutoSleepClientGameTest",

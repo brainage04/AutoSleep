@@ -5,7 +5,7 @@ import baritone.api.Settings;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 
-public final class AutoSleepGameTestClient implements ClientModInitializer {
+public final class AutoSleepRecordingClient implements ClientModInitializer {
     private boolean clearedChat;
 
     @Override

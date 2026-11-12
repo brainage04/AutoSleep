@@ -13,7 +13,7 @@ import net.minecraft.resources.Identifier;
 
 /**
  * The recording panel of MinecraftModConventions' {@code ClientGameTestRecordingHud}, drawn with
- * the 1.21.11 GUI API (the conventions runtime itself needs Minecraft 26.2): the current step's id,
+ * the 1.21.11 GUI API (the conventions runtime itself needs Minecraft 26.3): the current step's id,
  * title and expected result, and the last few things the test saw, in the top-right corner clear of
  * chat.
  */
@@ -43,7 +43,7 @@ public final class ClientGameTestRecordingHud {
                 VanillaHudElements.SCOREBOARD, HUD_ID, ClientGameTestRecordingHud::render);
     }
 
-    static void step(String id, String title, String expected) {
+    public static void step(String id, String title, String expected) {
         stepNumber++;
         String numberedId = stepNumber + ". " + id;
         System.out.println(
@@ -58,13 +58,13 @@ public final class ClientGameTestRecordingHud {
         showStep(numberedId, title, expected);
     }
 
-    static void showStep(String id, String title, String subtitle) {
+    private static void showStep(String id, String title, String subtitle) {
         Step step = new Step(clean(id), clean(title), clean(subtitle));
         currentStep = step;
         addLogLine(step.id() + " - " + step.title());
     }
 
-    static void log(String message) {
+    public static void log(String message) {
         String cleaned = clean(message);
         if (cleaned.isBlank()) {
             return;
@@ -185,7 +185,7 @@ public final class ClientGameTestRecordingHud {
         return end == 0 ? suffix : text.substring(0, end).stripTrailing() + suffix;
     }
 
-    static String clean(String value) {
+    private static String clean(String value) {
         return value == null ? "" : value.strip().replace('\n', ' ');
     }
 
