@@ -1,0 +1,11 @@
+AutoSleep
+Copyright 2026 brainage04. AutoSleep's own code is under the MIT License (LICENSE).
+
+AutoSleep's jar bundles Baritone 1.17.0, unmodified, as META-INF/jars/baritone-api-fabric-1.17.0.jar.
+That file is the release asset at https://github.com/cabaletta/baritone/releases/tag/v1.17.0.
+Baritone is licensed under the GNU Lesser General Public License, version 3 (COPYING.LESSER), which adds to the
+GNU General Public License, version 3 (COPYING).
+Baritone's source code for this version: https://github.com/cabaletta/baritone/tree/v1.17.0
+
+Baritone's jar bundles nether-pathfinder 1.6 as META-INF/jars/nether-pathfinder-1.6.jar.
+Its source code: https://github.com/babbaj/nether-pathfinder

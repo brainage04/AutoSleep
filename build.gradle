@@ -233,7 +233,8 @@ java {
 jar {
 	inputs.property "archivesName", project.base.archivesName
 
-	from("LICENSE") {
+	// The LGPL text and the notice cover the Baritone jar nested in this one.
+	from(files("LICENSE", "NOTICE", "COPYING", "COPYING.LESSER")) {
 		rename { "${it}_${inputs.properties.archivesName}"}
 	}
 }
