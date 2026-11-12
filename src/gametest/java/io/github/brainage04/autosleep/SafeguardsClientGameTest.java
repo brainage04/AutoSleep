@@ -21,15 +21,27 @@ import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestDedicatedServerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestServerConnection;
+import net.fabricmc.fabric.api.client.gametest.v1.context.TestServerContext;
+import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.ConnectScreen;
+import net.minecraft.client.gui.screens.LevelLoadingScreen;
+import net.minecraft.client.gui.screens.PauseScreen;
+import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.InteractionResult;
@@ -71,8 +83,16 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
     private static final int STAGE_LOAD_TIMEOUT_TICKS = 600;
     private static final int MONSTER_WATCH_TICKS = AutoSleeper.RETRY_INTERVAL_TICKS * 6;
 
-    /** A stone box in the Nether to stand in for a moment. */
-    private static final BlockPos NETHER_SPOT = new BlockPos(0, 100, 0);
+    /** A stone box to stand in for a moment, in the Nether or the second Overworld. */
+    private static final BlockPos BOX_SPOT = new BlockPos(0, 100, 0);
+
+    /** A datapack dimension of the Overworld's type, where a server lets the player sleep. */
+    private static final ResourceKey<Level> SECOND_OVERWORLD =
+            ResourceKey.create(
+                    Registries.DIMENSION,
+                    Identifier.fromNamespaceAndPath("autosleep_test", "second_overworld"));
+
+    private static final long DAY_LENGTH = 24000L;
 
     private final List<String> failures = new ArrayList<>();
     private final List<BlockPos> serverBedUses = new CopyOnWriteArrayList<>();
@@ -80,7 +100,8 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
     private final List<String> serverChat = new CopyOnWriteArrayList<>();
     private final List<TranslatableContents> modMessages = new CopyOnWriteArrayList<>();
     private ClientGameTestContext context;
-    private TestDedicatedServerContext server;
+    private TestServerContext server;
+    private TestDedicatedServerContext dedicated;
     private TestServerConnection connection;
 
     /** The server refuses every use of this bed, as a plugin may. */
@@ -132,45 +153,49 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
                 });
         ClientTickEvents.END_CLIENT_TICK.register(this::watch);
 
-        try (TestDedicatedServerContext server =
+        try (TestDedicatedServerContext dedicated =
                 context.worldBuilder().createServer(GameTestServers.serverProperties())) {
-            this.server = server;
-            connection = server.connect();
+            this.dedicated = dedicated;
+            server = dedicated;
+            connection = dedicated.connect();
             try {
-                server.runOnServer(
-                        minecraftServer -> {
-                            minecraftServer.setDifficulty(Difficulty.PEACEFUL, true);
-                            GameRules rules = minecraftServer.overworld().getGameRules();
-                            rules.set(GameRules.ADVANCE_TIME, false, minecraftServer);
-                            rules.set(GameRules.ADVANCE_WEATHER, false, minecraftServer);
-                            rules.set(GameRules.SHOW_ADVANCEMENT_MESSAGES, false, minecraftServer);
-                            // monsters-nearby summons its own: no other may spawn while it runs.
-                            rules.set(GameRules.SPAWN_MONSTERS, false, minecraftServer);
-                        });
-                command("gamemode survival @a");
-                command("weather clear");
-
+                setUpServer();
                 run("chat-reaches-the-server", this::chatReachesTheServer);
                 run("stays-up-after-leaving-the-bed", this::staysUpAfterLeavingTheBed);
+                run("stays-up-in-its-own-dimension", this::sleepsInAnotherDimensionAfterStayingUp);
+                run("stay-up-ends-the-next-day", this::staysUpUntilTheNextDayAnywhere);
+                run("stays-up-in-its-own-world", this::sleepsInAnotherWorldAfterStayingUp);
                 run("sneaking-with-blocks", this::waitsWhileSneakingWithBlocks);
                 run("sneak-before-the-click", this::neverClicksWhenSneakingStartsAtTheTurn);
                 run("bed-under-the-floor", this::givesUpABedTheCrosshairCannotReach);
                 run("crosshair-short-of-the-bed", this::neverUsesABedTheCrosshairFallsShortOf);
                 run("server-refuses-the-bed", this::givesUpABedTheServerRefuses);
                 run("monsters-nearby", this::keepsToABedWithMonstersNearby);
+                run("monster-stays", this::givesUpABedAMonsterNeverLeaves);
+                run("monster-walk-away", this::neverWalksBackToAMonstersBed);
+                run("monster-stop", this::stopsAtAMonstersBedOnStop);
+                run("monster-bed-broken", this::forgetsAMonstersBedOnceItIsGone);
                 run("bed-in-a-pit", this::neverUsesAWaterBucket);
                 run("walk-never-arrives", this::givesUpAWalkThatNeverArrives);
                 run("walk-switches-beds", this::keepsThePlayersSettingsWhenTheWalkSwitchesBeds);
                 run("own-baritone-goal", this::leavesThePlayersBaritoneAlone);
                 run("goal-from-another-mod", this::keepsAGoalAnotherModSets);
-                run("stop-ends-the-walk", this::leavesTheBedAloneAfterStop);
+                run("stop-ends-the-walk", this::staysUpAfterStop);
                 run("mine-during-the-walk", this::letsThePlayerMineDuringTheWalk);
                 run("settings-file", this::keepsTheSettingsFileThePlayers);
+                run("own-chat-control", this::keepsThePlayersOwnChatControl);
                 run("screen-open", this::waitsWhileAScreenIsOpen);
                 run("spectator", this::doesNothingInSpectatorMode);
             } finally {
                 connection.close();
             }
+        }
+
+        // The pause menu pauses the game only in singleplayer (Minecraft#isPaused).
+        try (TestSingleplayerContext singleplayer = context.worldBuilder().create()) {
+            server = singleplayer.getServer();
+            setUpServer();
+            run("walk-paused", this::keepsTheWalkThroughThePauseMenu);
         }
 
         if (!failures.isEmpty()) {
@@ -179,6 +204,21 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
                             + " safeguard step(s) failed:\n  "
                             + String.join("\n  ", failures));
         }
+    }
+
+    private void setUpServer() {
+        server.runOnServer(
+                minecraftServer -> {
+                    minecraftServer.setDifficulty(Difficulty.PEACEFUL, true);
+                    GameRules rules = minecraftServer.overworld().getGameRules();
+                    rules.set(GameRules.ADVANCE_TIME, false, minecraftServer);
+                    rules.set(GameRules.ADVANCE_WEATHER, false, minecraftServer);
+                    rules.set(GameRules.SHOW_ADVANCEMENT_MESSAGES, false, minecraftServer);
+                    // The monster steps summon their own: no other may spawn while they run.
+                    rules.set(GameRules.SPAWN_MONSTERS, false, minecraftServer);
+                });
+        command("gamemode survival @a");
+        command("weather clear");
     }
 
     /** Runs one step; a failure is recorded, the player is put back in order, and the next runs. */
@@ -206,10 +246,12 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
                         client.options.keyShift.setDown(false);
                         sneakOnTurnFrom = null;
                         watchedForWater = null;
+                        TimePacketHold.reset();
                         baritone().getPathingBehavior().cancelEverything();
                     });
             server.runOnServer(
                     minecraftServer -> minecraftServer.setDifficulty(Difficulty.PEACEFUL, true));
+            command("kill @e[type=minecraft:zombie]");
             command("gamemode survival @a");
             command("clear @a");
             day();
@@ -245,36 +287,92 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
                 "Midnight, a bed in reach; the player sleeps, then leaves the bed",
                 "Stays up for the rest of the night, and sleeps again the next night");
         night();
-        fallAsleepIn(bed, AutoSleeper.RETRY_INTERVAL_TICKS * 2);
-        // What the Leave Bed button sends (InBedChatScreen#sendWakeUp).
-        context.runOnClient(
-                client ->
-                        client.player.connection.send(
-                                new ServerboundPlayerCommandPacket(
-                                        client.player,
-                                        ServerboundPlayerCommandPacket.Action.STOP_SLEEPING)));
-        context.waitFor(client -> !client.player.isSleeping(), 40);
-        serverBedUses.clear();
-        clientBedUses.set(0);
-        context.waitTicks(STAY_UP_TICKS);
-        assertNoBedUse("in the " + STAY_UP_TICKS / 20 + " s after leaving the bed");
+        leaveTheBed(bed);
+        assertStaysUp("in the " + STAY_UP_TICKS / 20 + " s after leaving the bed");
         ClientGameTestRecordingHud.log("Stayed up for " + STAY_UP_TICKS / 20 + " s");
         visitTheNether();
+        // The Overworld's time reaches the client 5 ticks after the level, as it can over a
+        // network: until then the client sees day time 0, a morning.
+        context.runOnClient(client -> TimePacketHold.armForNextLevel(client.level, 5));
+        serverBedUses.clear();
+        clientBedUses.set(0);
         standAt(CENTRE, 180.0F);
-        serverBedUses.clear();
-        clientBedUses.set(0);
-        context.waitTicks(STAY_UP_TICKS);
-        assertNoBedUse("after a trip to the Nether and back the same night");
+        assertStaysUp("after a trip to the Nether and back the same night");
         reconnect();
-        serverBedUses.clear();
-        clientBedUses.set(0);
-        context.waitTicks(STAY_UP_TICKS);
-        assertNoBedUse("after a reconnect the same night");
+        assertStaysUp("after a reconnect the same night");
         ClientGameTestRecordingHud.log("Still up after the Nether and a reconnect");
         day();
         night();
         fallAsleepIn(bed, AutoSleeper.RETRY_INTERVAL_TICKS * 2);
         ClientGameTestRecordingHud.log("Asleep again the next night");
+    }
+
+    private void sleepsInAnotherDimensionAfterStayingUp() {
+        day();
+        buildStage();
+        BlockPos bed = CENTRE.offset(0, 0, 3);
+        placeBed(bed);
+        standAt(CENTRE, 180.0F);
+        step(
+                "stays-up-in-its-own-dimension",
+                "Midnight; the player leaves the bed, then goes to another dimension of the"
+                        + " Overworld's type, with a bed in reach",
+                "Sleeps there: staying up holds only in the dimension where the player left the"
+                        + " bed");
+        night();
+        leaveTheBed(bed);
+        assertStaysUp("after leaving the bed");
+        BlockPos otherBed = standInABox(SECOND_OVERWORLD, true);
+        fallAsleepIn(otherBed, SLEEP_TIMEOUT_TICKS);
+    }
+
+    private void staysUpUntilTheNextDayAnywhere() {
+        day();
+        buildStage();
+        BlockPos bed = CENTRE.offset(0, 0, 3);
+        placeBed(bed);
+        standAt(CENTRE, 180.0F);
+        step(
+                "stay-up-ends-the-next-day",
+                "Midnight; the player leaves the bed, the next day and the next night pass while"
+                        + " they are in the Nether, then they come back",
+                "Sleeps in the bed: the new day in the Nether ended staying up");
+        night();
+        leaveTheBed(bed);
+        assertStaysUp("after leaving the bed");
+        visitTheNether();
+        command("time set " + (MORNING + DAY_LENGTH));
+        context.waitFor(client -> client.level.getDayTime() == MORNING + DAY_LENGTH, 100);
+        context.waitTicks(5);
+        command("time set " + (MIDNIGHT + DAY_LENGTH));
+        context.waitFor(client -> client.level.getDayTime() == MIDNIGHT + DAY_LENGTH, 100);
+        standAt(CENTRE, 180.0F);
+        fallAsleepIn(bed, SLEEP_TIMEOUT_TICKS);
+    }
+
+    private void sleepsInAnotherWorldAfterStayingUp() {
+        day();
+        buildStage();
+        BlockPos bed = CENTRE.offset(0, 0, 3);
+        placeBed(bed);
+        standAt(CENTRE, 180.0F);
+        step(
+                "stays-up-in-its-own-world",
+                "Midnight; the player leaves the bed, then joins the server under another address,"
+                        + " which the mod takes for another world",
+                "Sleeps there: staying up holds only in the world where the player left the bed");
+        night();
+        leaveTheBed(bed);
+        assertStaysUp("after leaving the bed");
+        connection.close();
+        int port = dedicated.computeOnServer(minecraftServer -> minecraftServer.getPort());
+        try {
+            joinAs("127.0.0.1:" + port);
+            fallAsleepIn(bed, SLEEP_TIMEOUT_TICKS);
+        } finally {
+            leaveTheServer();
+            connection = dedicated.connect();
+        }
     }
 
     private void waitsWhileSneakingWithBlocks() {
@@ -589,13 +687,15 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
         assertToldOnce(AutoSleeper.BED_UNUSABLE_MESSAGE, refused);
     }
 
-    private void keepsToABedWithMonstersNearby() {
+    /** The near bed (in reach) with a monster beside it, and a far bed 11 blocks away. */
+    private record MonsterStage(BlockPos near, BlockPos far) {}
+
+    private MonsterStage buildMonsterStage() {
         day();
         buildStage();
-        BlockPos near = CENTRE.offset(0, 0, 3);
-        BlockPos far = CENTRE.offset(0, 0, -11);
-        placeBed(near);
-        placeBed(far);
+        MonsterStage stage = new MonsterStage(CENTRE.offset(0, 0, 3), CENTRE.offset(0, 0, -11));
+        placeBed(stage.near());
+        placeBed(stage.far());
         standAt(CENTRE, 180.0F);
         // Within the 8 x 5 x 8 blocks around the near bed that ServerPlayer#startSleepInBed checks
         // (ServerPlayer.java:1203-1214 in 1.21.11), far from the other bed.
@@ -612,32 +712,130 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
         context.waitFor(
                 client ->
                         !client.level
-                                .getEntitiesOfClass(Zombie.class, new AABB(near).inflate(8.0D))
+                                .getEntitiesOfClass(
+                                        Zombie.class, new AABB(stage.near()).inflate(8.0D))
                                 .isEmpty(),
                 100);
+        modMessages.clear();
+        serverBedUses.clear();
+        clientBedUses.set(0);
+        return stage;
+    }
+
+    /** Night falls; waits for the first use of the near bed, which the server refuses. */
+    private void waitForTheFirstRefusal(MonsterStage stage) {
+        night();
+        context.waitFor(client -> serverBedUses.contains(stage.near()), 100);
+        context.waitTicks(5);
+    }
+
+    private void keepsToABedWithMonstersNearby() {
+        MonsterStage stage = buildMonsterStage();
         step(
                 "monsters-nearby",
                 "Midnight, a bed in reach with a monster beside it, another bed 11 blocks away",
-                "Keeps trying the first bed, which has the respawn point now, and never the other;"
-                        + " sleeps once the monster is gone");
-        modMessages.clear();
+                "Tries the first bed, which has the respawn point now, every "
+                        + AutoSleeper.NOT_SAFE_RETRY_TICKS / 20
+                        + " s and never the other; sleeps once the monster is gone");
+        waitForTheFirstRefusal(stage);
         serverBedUses.clear();
-        night();
-        context.waitTicks(MONSTER_WATCH_TICKS);
-        long nearUses = serverBedUses.stream().filter(near::equals).count();
-        if (nearUses <= AutoSleeper.TRIES_PER_BED
-                || serverBedUses.contains(far)
+        int watch = AutoSleeper.NOT_SAFE_RETRY_TICKS * 2 + 10;
+        context.waitTicks(watch);
+        long nearUses = serverBedUses.stream().filter(stage.near()::equals).count();
+        if (nearUses < 1
+                || nearUses > 2
+                || serverBedUses.contains(stage.far())
                 || !modMessages.isEmpty()) {
             throw new AssertionError(
-                    "Expected the bed with the monster beside it tried more than "
-                            + AutoSleeper.TRIES_PER_BED
-                            + " times, the other bed never and no message, but the server saw "
+                    "Expected the bed with the monster beside it tried once or twice in "
+                            + watch
+                            + " ticks, the other bed never and no message, but the server saw "
                             + serverBedUses
                             + " and the mod said "
                             + modMessages.stream().map(TranslatableContents::getKey).toList());
         }
         command("kill @e[type=minecraft:zombie]");
-        fallAsleepIn(near, AutoSleeper.RETRY_INTERVAL_TICKS * 3);
+        fallAsleepIn(stage.near(), SLEEP_TIMEOUT_TICKS);
+    }
+
+    private void givesUpABedAMonsterNeverLeaves() {
+        MonsterStage stage = buildMonsterStage();
+        step(
+                "monster-stays",
+                "Midnight, a bed in reach with a monster beside it that never leaves",
+                "Gives the bed up after "
+                        + AutoSleeper.NOT_SAFE_GIVE_UP_TICKS / 20
+                        + " s, says so once, uses no other bed");
+        waitForTheFirstRefusal(stage);
+        context.waitTicks(AutoSleeper.NOT_SAFE_GIVE_UP_TICKS + 20);
+        assertToldOnce(AutoSleeper.BED_NOT_SAFE_MESSAGE, stage.near());
+        serverBedUses.clear();
+        clientBedUses.set(0);
+        context.waitTicks(AutoSleeper.NOT_SAFE_RETRY_TICKS * 2);
+        assertNoBedUse("after the bed was given up");
+    }
+
+    private void neverWalksBackToAMonstersBed() {
+        MonsterStage stage = buildMonsterStage();
+        step(
+                "monster-walk-away",
+                "Midnight, a bed in reach with a monster beside it; after the first refusal the"
+                        + " player moves 11 blocks away",
+                "Never walks the player back to that bed, and uses no other");
+        waitForTheFirstRefusal(stage);
+        BlockPos away = CENTRE.offset(-6, 0, -6);
+        standAt(away, 180.0F);
+        serverBedUses.clear();
+        clientBedUses.set(0);
+        context.waitTicks(AutoSleeper.NOT_SAFE_RETRY_TICKS * 2);
+        boolean walking =
+                context.computeOnClient(client -> baritone().getCustomGoalProcess().isActive());
+        BlockPos at = context.computeOnClient(client -> client.player.blockPosition());
+        if (walking || !at.equals(away)) {
+            throw new AssertionError(
+                    "Expected the player left where they moved to, at "
+                            + away.toShortString()
+                            + ", but they are at "
+                            + at.toShortString()
+                            + (walking ? " and Baritone walks" : ""));
+        }
+        assertNoBedUse("after the player moved away");
+    }
+
+    private void stopsAtAMonstersBedOnStop() {
+        MonsterStage stage = buildMonsterStage();
+        step(
+                "monster-stop",
+                "Midnight, a bed in reach with a monster beside it; after the first refusal the"
+                        + " player types #stop",
+                "Stops for the night, says so once");
+        waitForTheFirstRefusal(stage);
+        playerCommand("#stop");
+        serverBedUses.clear();
+        clientBedUses.set(0);
+        context.waitTicks(AutoSleeper.NOT_SAFE_RETRY_TICKS * 2);
+        assertNoBedUse("after #stop");
+        assertToldOnce(AutoSleeper.STOPPED_MESSAGE);
+    }
+
+    private void forgetsAMonstersBedOnceItIsGone() {
+        MonsterStage stage = buildMonsterStage();
+        step(
+                "monster-bed-broken",
+                "Midnight, a bed in reach with a monster beside it; after the first refusal that"
+                        + " bed is broken",
+                "Sleeps in the other bed");
+        waitForTheFirstRefusal(stage);
+        server.runOnServer(
+                minecraftServer -> {
+                    ServerLevel level = minecraftServer.overworld();
+                    level.setBlock(stage.near(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                    level.setBlock(
+                            stage.near().relative(Direction.NORTH),
+                            Blocks.AIR.defaultBlockState(),
+                            Block.UPDATE_ALL);
+                });
+        fallAsleepIn(stage.far(), SLEEP_TIMEOUT_TICKS);
     }
 
     private void givesUpAWalkThatNeverArrives() {
@@ -752,30 +950,35 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
         }
     }
 
-    private void leavesTheBedAloneAfterStop() {
+    private void staysUpAfterStop() {
         day();
         buildStage();
         BlockPos bed = CENTRE.offset(0, 0, 8);
+        BlockPos other = CENTRE.offset(0, 0, -12);
         placeBed(bed);
+        placeBed(other);
         standAt(CENTRE, 180.0F);
         step(
                 "stop-ends-the-walk",
-                "Midnight, a bed out of reach; the player types #stop during the walk",
-                "Stops, gives the player's settings back, leaves that bed alone for the rest of the"
-                        + " night, and sleeps in it the next night");
+                "Midnight, two beds out of reach; the player types #stop during the walk to the"
+                        + " nearer one",
+                "Stops, says so once, gives the player's settings back, uses no bed for the rest of"
+                        + " the night, and sleeps the next night");
+        modMessages.clear();
         night();
         waitForTheWalk();
         playerCommand("#stop");
         assertSettings(true, "after #stop");
         serverBedUses.clear();
         clientBedUses.set(0);
-        context.waitTicks(WATCH_TICKS);
+        context.waitTicks(WATCH_TICKS * 3);
         boolean walking =
                 context.computeOnClient(client -> baritone().getCustomGoalProcess().isActive());
         if (walking) {
             throw new AssertionError("Expected no walk after #stop, but Baritone walks again.");
         }
         assertNoBedUse("after #stop");
+        assertToldOnce(AutoSleeper.STOPPED_MESSAGE);
         day();
         standAt(CENTRE, 180.0F);
         night();
@@ -859,6 +1062,68 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
         playerCommand("#set chatDebug false");
         assertSettingsFile(
                 afterSet, "after a trip to the Nether during a walk, then #set chatDebug false");
+
+        // Aliases run their target command through the command manager (CommandAlias.java:46-48
+        // in Baritone 1.17.0), so the wrapped target runs inside the wrapped alias.
+        day();
+        playerCommand("#modified");
+        playerCommand("#set chatDebug true");
+        assertSettingsFile(saved, "after #modified, then #set chatDebug true");
+        playerCommand("#reset all");
+        assertNoForcedValues(settingsFile(), "after #reset all");
+        playerCommand("#set chatDebug true");
+        List<String> afterReset = settingsFile().lines().toList();
+        if (!afterReset.equals(List.of("chatDebug true"))) {
+            throw new AssertionError(
+                    "Expected baritone/settings.txt after #reset all, then #set chatDebug true, to"
+                            + " hold only chatDebug true, but it reads "
+                            + afterReset);
+        }
+    }
+
+    private void keepsThePlayersOwnChatControl() {
+        step(
+                "own-chat-control",
+                "By day the player turns Baritone's chatControl off with #set, then sets another"
+                        + " setting",
+                "baritone/settings.txt keeps the player's chatControl false");
+        playerCommand("#set chatControl false");
+        playerCommand("#set chatDebug false");
+        List<String> lines = settingsFile().lines().toList();
+        playerCommand("#set chatControl true");
+        if (!lines.contains("chatControl false")) {
+            throw new AssertionError(
+                    "Expected the player's chatControl false kept in baritone/settings.txt, but it"
+                            + " reads "
+                            + lines);
+        }
+    }
+
+    private void keepsTheWalkThroughThePauseMenu() {
+        day();
+        buildStage();
+        BlockPos bed = CENTRE.offset(0, 0, 10);
+        placeBed(bed);
+        standAt(CENTRE, 180.0F);
+        step(
+                "walk-paused",
+                "Singleplayer, midnight, a bed out of reach; the pause menu is open for "
+                        + (AutoSleeper.WALK_DEADLINE_TICKS + 20) / 20
+                        + " s during the walk",
+                "Goes on with the walk once the menu is closed, and sleeps in that bed");
+        modMessages.clear();
+        night();
+        waitForTheWalk();
+        context.setScreen(() -> new PauseScreen(true));
+        context.waitFor(Minecraft::isPaused, 20);
+        context.waitTicks(AutoSleeper.WALK_DEADLINE_TICKS + 20);
+        context.setScreen(() -> null);
+        fallAsleepIn(bed, SLEEP_TIMEOUT_TICKS);
+        if (!modMessages.isEmpty()) {
+            throw new AssertionError(
+                    "Expected no message, but the mod said "
+                            + modMessages.stream().map(TranslatableContents::getKey).toList());
+        }
     }
 
     /**
@@ -866,6 +1131,7 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
      * briefly it is there, and starts sneaking on the tick the mod turns the view.
      */
     private void watch(Minecraft client) {
+        TimePacketHold.tick(client);
         if (client.level == null || client.player == null) {
             return;
         }
@@ -913,6 +1179,9 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
         context.waitFor(
                 client -> client.level.getBlockState(CENTRE.below()).is(Blocks.STONE),
                 STAGE_LOAD_TIMEOUT_TICKS);
+        // Steps build their stage by day: a morning the mod sees in the Overworld ends any stay-up
+        // the last step left, once the new level has waited for the server's time.
+        context.waitTicks(AutoSleeper.TIME_SYNC_TICKS + 5);
     }
 
     /** A bed with its head at {@code head}, facing south. */
@@ -1031,6 +1300,14 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
         }
     }
 
+    private void assertToldOnce(String key) {
+        long told = modMessages.stream().filter(message -> message.getKey().equals(key)).count();
+        if (told != 1) {
+            throw new AssertionError(
+                    "Expected the player told once (" + key + "), but told " + told + " times.");
+        }
+    }
+
     private void assertGoal(Goal expected, String when) {
         Goal goal = context.computeOnClient(client -> baritone().getCustomGoalProcess().getGoal());
         if (goal != expected) {
@@ -1137,34 +1414,114 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
     /** Disconnects and joins the same server again, where the player was. */
     private void reconnect() {
         connection.close();
-        connection = server.connect();
+        connection = dedicated.connect();
         context.waitTicks(20);
+    }
+
+    /**
+     * Joins the dedicated server under another address, the way the harness's {@code connect()}
+     * does with its own ({@code TestDedicatedServerContextImpl#connect}).
+     */
+    private void joinAs(String address) {
+        context.runOnClient(
+                client ->
+                        ConnectScreen.startConnecting(
+                                client.screen,
+                                client,
+                                ServerAddress.parseString(address),
+                                new ServerData("other address", address, ServerData.Type.OTHER),
+                                false,
+                                null));
+        context.waitFor(
+                client ->
+                        client.level != null
+                                && client.player != null
+                                && !(client.screen instanceof LevelLoadingScreen),
+                STAGE_LOAD_TIMEOUT_TICKS);
+        context.waitTicks(20);
+    }
+
+    /** Leaves a server joined with {@link #joinAs}, as {@code TestServerConnection#close} does. */
+    private void leaveTheServer() {
+        context.runOnClient(
+                client -> {
+                    if (client.level != null) {
+                        client.level.disconnect(Component.literal("Disconnecting"));
+                        client.disconnectWithSavingScreen();
+                    }
+                });
+        context.waitFor(client -> client.level == null);
+        context.setScreen(TitleScreen::new);
+    }
+
+    /** The player sleeps in the bed and then leaves it, as with the Leave Bed button. */
+    private void leaveTheBed(BlockPos bed) {
+        fallAsleepIn(bed, AutoSleeper.RETRY_INTERVAL_TICKS * 2);
+        // What the Leave Bed button sends (InBedChatScreen#sendWakeUp).
+        context.runOnClient(
+                client ->
+                        client.player.connection.send(
+                                new ServerboundPlayerCommandPacket(
+                                        client.player,
+                                        ServerboundPlayerCommandPacket.Action.STOP_SLEEPING)));
+        context.waitFor(client -> !client.player.isSleeping(), 40);
+        serverBedUses.clear();
+        clientBedUses.set(0);
+    }
+
+    /** No bed use in the next {@link #STAY_UP_TICKS}. */
+    private void assertStaysUp(String when) {
+        context.waitTicks(STAY_UP_TICKS);
+        assertNoBedUse(when);
+        serverBedUses.clear();
+        clientBedUses.set(0);
     }
 
     /** A second in a stone box in the Nether. */
     private void visitTheNether() {
+        standInABox(Level.NETHER, false);
+    }
+
+    /**
+     * Puts the player in a stone box at {@link #BOX_SPOT} in that dimension, with a bed in reach if
+     * asked for, and returns the bed's head.
+     */
+    private @Nullable BlockPos standInABox(ResourceKey<Level> dimension, boolean withBed) {
+        BlockPos head = BOX_SPOT.offset(0, 0, 2);
         server.runOnServer(
                 minecraftServer -> {
-                    ServerLevel nether = minecraftServer.getLevel(Level.NETHER);
+                    ServerLevel level = minecraftServer.getLevel(dimension);
                     for (BlockPos pos :
                             BlockPos.betweenClosed(
-                                    NETHER_SPOT.offset(-3, -1, -3), NETHER_SPOT.offset(3, 3, 3))) {
+                                    BOX_SPOT.offset(-3, -1, -3), BOX_SPOT.offset(3, 3, 3))) {
                         boolean wall =
-                                Math.abs(pos.getX() - NETHER_SPOT.getX()) == 3
-                                        || Math.abs(pos.getZ() - NETHER_SPOT.getZ()) == 3
-                                        || pos.getY() == NETHER_SPOT.getY() - 1
-                                        || pos.getY() == NETHER_SPOT.getY() + 3;
-                        nether.setBlock(
+                                Math.abs(pos.getX() - BOX_SPOT.getX()) == 3
+                                        || Math.abs(pos.getZ() - BOX_SPOT.getZ()) == 3
+                                        || pos.getY() == BOX_SPOT.getY() - 1
+                                        || pos.getY() == BOX_SPOT.getY() + 3;
+                        level.setBlock(
                                 pos,
                                 wall
                                         ? Blocks.STONE.defaultBlockState()
                                         : Blocks.AIR.defaultBlockState(),
                                 Block.UPDATE_CLIENTS);
                     }
+                    if (withBed) {
+                        BlockState bed =
+                                Blocks.RED_BED
+                                        .defaultBlockState()
+                                        .setValue(BedBlock.FACING, Direction.SOUTH);
+                        level.setBlockAndUpdate(
+                                head.relative(Direction.NORTH),
+                                bed.setValue(BedBlock.PART, BedPart.FOOT));
+                        level.setBlockAndUpdate(head, bed.setValue(BedBlock.PART, BedPart.HEAD));
+                    }
                 });
-        Vec3 feet = Vec3.atBottomCenterOf(NETHER_SPOT);
+        Vec3 feet = Vec3.atBottomCenterOf(BOX_SPOT);
         command(
-                "execute in minecraft:the_nether run tp @a "
+                "execute in "
+                        + dimension.identifier()
+                        + " run tp @a "
                         + feet.x
                         + " "
                         + feet.y
@@ -1172,10 +1529,11 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
                         + feet.z);
         context.waitFor(
                 client ->
-                        client.level.dimension() == Level.NETHER
+                        client.level.dimension() == dimension
                                 && client.player.position().distanceTo(feet) < 0.1D,
                 STAGE_LOAD_TIMEOUT_TICKS);
         context.waitTicks(20);
+        return withBed ? head : null;
     }
 
     private void assertNothingPlacedOn(BlockPos bed, String when) {
