@@ -10,6 +10,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.world.Difficulty;
@@ -25,6 +26,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BedPart;
 import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -45,28 +48,34 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
     /** Ten ticks before the Overworld's night, so the recording shows the trigger itself rather than a wait. */
     private static final long TEN_TICKS_BEFORE_NIGHT = DayNightCycleHud.NIGHT_START - 10L;
     /**
-     * Half a second of daylight, including the settle after the teleport, so the time is set to ten ticks before night
-     * about half a second into the clip and the walk starts about a second in.
+     * Every scenario shows its setup by day first: a second and a half of daylight, then the ten ticks of dusk, about
+     * two seconds in which the mod must do nothing, before night falls on the same setup.
      */
-    private static final int DAY_CHECK_TICKS = 5;
-    private static final int REACH_CHECK_TICKS = 20;
+    private static final int DAY_CHECK_TICKS = 30;
+    /** Ticks for the player to settle after a teleport, before the scenario starts on camera. */
+    private static final int SETTLE_TICKS = 5;
     private static final int AWAKE_CHECK_TICKS = AutoSleeper.RETRY_INTERVAL_TICKS * 5;
     private static final int WALK_AND_SLEEP_TIMEOUT_TICKS = 200;
     private static final int WAKE_UP_TIMEOUT_TICKS = 600;
     /** The mod must start on the first tick that shows night: a tick or two of ordering slack, nothing more. */
     private static final int TICKS_TO_ACT = 2;
     /**
+     * The pre-built scene: an oak plank floor with the red bed's head at (0, surface, 8) and the blue bed's head at
+     * (10, surface, 8), both facing south. Its corner sits at this offset from the red bed's head.
+     */
+    private static final Identifier SCENE = Identifier.fromNamespaceAndPath("autosleep_test", "bedroom");
+    private static final BlockPos SCENE_CORNER_FROM_RED_BED = new BlockPos(-3, -1, -9);
+    /**
      * Four and a half blocks in front of the red bed's foot: the mod's 3-block reach is exceeded, and the walk to the
      * bed is short enough to show at once.
      */
     private static final double RED_BED_FOUR_AND_A_HALF_BLOCKS_AWAY_Z = 2.5D;
-    /** In reach of the red bed and looking straight at it: three blocks north of its foot, inside the reach box. */
-    private static final double IN_REACH_FACING_THE_RED_BED_Z = 4.8D;
-    /** Beside the red bed, one block north of its foot, so the bed is behind the player. */
-    private static final double BESIDE_THE_RED_BED_Z = 6.0D;
-    /** The red bed is south of the start position, at larger Z: looking at it is yaw 0, looking away is yaw 180. */
+    /** In reach of the red bed, 2.7 blocks north of its foot, inside the reach box. */
+    private static final double IN_REACH_OF_THE_RED_BED_Z = 4.8D;
+    /** The red bed is south of the start position, at larger Z: looking at it is yaw 0. */
     private static final float TOWARD_THE_RED_BED = 0.0F;
-    private static final float AWAY_FROM_THE_RED_BED = 180.0F;
+    /** Thirty degrees beside the red bed: the whole bed is in view, and the crosshair is on the floor beside it. */
+    private static final float BESIDE_THE_RED_BED = 30.0F;
     private static final float LOOK_DOWN_AT_THE_FLOOR = 12.0F;
     private static final float LOOK_DOWN_AT_THE_BED = 22.0F;
 
@@ -123,10 +132,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
             // mod picks the nearest bed rather than a fixed one.
             redBed = new BlockPos(0, y, 8);
             blueBed = new BlockPos(10, y, 8);
-            server.runOnServer(minecraftServer -> {
-                placeBed(minecraftServer.overworld(), redBed, Blocks.RED_BED);
-                placeBed(minecraftServer.overworld(), blueBed, Blocks.BLUE_BED);
-            });
+            server.runOnServer(minecraftServer -> placeScene(minecraftServer.overworld()));
             command("gamemode survival @a");
             command("weather clear");
             command("time set day");
@@ -138,44 +144,26 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
                 }
             });
 
-            // One shot, no cut: the negative (day, nothing) and the positive (nightfall, walk and sleep) are the same
-            // setup, so the recording shows why nothing happens and then what happens when it may.
-            clearChat();
-            step("daytime", "Day: the red bed 4.5 blocks away, nothing happens.",
-                    "Night falls: it walks at once, then looks and sleeps.");
-            assertStaysStill("during the day", DAY_CHECK_TICKS);
-            command("time set " + TEN_TICKS_BEFORE_NIGHT);
-            int ticksToNight = context.waitFor(client -> client.level.isDarkOutside(), 100);
-            int ticksToWalk = context.waitFor(client -> hasBaritoneGoal(), 20);
-            if (ticksToWalk > TICKS_TO_ACT) {
-                throw new AssertionError("Expected the walk to start within " + TICKS_TO_ACT + " ticks of the client"
-                        + " seeing night, but it started " + ticksToWalk + " ticks later.");
-            }
-            ClientGameTestRecordingHud.log("Night fell after " + ticksToNight + " ticks: walking on tick " + ticksToWalk);
+            // Every scenario is one shot of one setup: by day the mod must do nothing, then night falls on the same
+            // setup and it must act at once. The setup happens before the step marker, which the cut starts after,
+            // so each clip opens on its scene, already in place.
+            startScenario("out-of-reach", "Day, the red bed 4.5 blocks away: nothing happens.",
+                    "Night falls: it walks to the bed at once and sleeps.");
+            assertStaysStill("by day, out of reach", DAY_CHECK_TICKS);
+            nightFalls();
+            assertWalksAtOnce();
             assertOutOfReach("before walking");
             fallAsleepIn(redBed, "when night falls", WALK_AND_SLEEP_TIMEOUT_TICKS);
             sleepThroughTheNight();
 
-            clearChat();
-            step("bed-in-reach-day", "Day, in reach of the red bed and looking at it.",
-                    "Nothing happens, although the bed is right there.");
-            command("time set day");
-            teleport(0.5D, IN_REACH_FACING_THE_RED_BED_Z, TOWARD_THE_RED_BED, LOOK_DOWN_AT_THE_BED);
-            serverBedUses.set(0);
-            clientBedUses.set(0);
-            assertInReach("by day, looking at the red bed");
-            assertStaysStill("in reach, but out of bed by day", REACH_CHECK_TICKS);
-
-            clearChat();
-            step("bed-in-reach", "Night, beside the red bed and facing away.",
-                    "It looks at the bed and uses it in one tick.");
-            teleport(0.5D, BESIDE_THE_RED_BED_Z, AWAY_FROM_THE_RED_BED);
-            // Still daylight: the caption is readable for half a second before the action, which then takes one tick.
-            context.waitTicks(10);
-            command("time set night");
-            serverBedUses.set(0);
-            clientBedUses.set(0);
-            context.waitFor(client -> client.level.isDarkOutside(), 100);
+            teleport(0.5D, IN_REACH_OF_THE_RED_BED_Z, BESIDE_THE_RED_BED, LOOK_DOWN_AT_THE_BED);
+            assertInReach("beside the crosshair");
+            assertBedsInView("beside the crosshair", redBed);
+            assertCrosshairOffTheBed();
+            startScenario("in-reach", "Day, the red bed in reach beside the crosshair: nothing happens.",
+                    "Night falls: it looks at the bed and uses it in one tick.");
+            assertStaysStill("by day, in reach", DAY_CHECK_TICKS);
+            nightFalls();
             // The use itself, not the sleeping state: the pose reaches the client a tick or two after the server
             // accepts it, and this is what the mod decides on its own.
             int ticksToUse = context.waitFor(client -> clientBedUses.get() > 0, 20);
@@ -189,28 +177,24 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
             ClientGameTestRecordingHud.log("The bed was used " + ticksToUse + " ticks after nightfall");
             sleepThroughTheNight();
 
-            clearChat();
-            step("nearest-bed", "Night, two beds in view: the blue bed is nearer.",
-                    "It walks to the blue bed, looks at it and sleeps.");
             standBetweenTheBeds(9.0D, 1.0D);
-            assertBothBedsInView("before the walk to the blue bed");
-            context.waitTicks(5);
-            command("time set night");
-            serverBedUses.set(0);
-            clientBedUses.set(0);
+            assertBedsInView("with the blue bed nearer", redBed, blueBed);
+            startScenario("nearest-bed-blue", "Day, two beds in view, the blue one nearer: nothing happens.",
+                    "Night falls: it walks to the blue bed and sleeps.");
+            assertStaysStill("by day, with the blue bed nearer", DAY_CHECK_TICKS);
+            nightFalls();
+            assertWalksAtOnce();
             assertOutOfReach("before walking to the blue bed");
             fallAsleepIn(blueBed, "when the blue bed is nearest", WALK_AND_SLEEP_TIMEOUT_TICKS);
             sleepThroughTheNight();
 
-            clearChat();
-            step("nearest-bed-red", "Night, the same two beds: the red bed is nearer.",
-                    "It walks to the red bed instead, looks at it and sleeps.");
             standBetweenTheBeds(2.0D, 1.0D);
-            assertBothBedsInView("before the walk to the red bed");
-            context.waitTicks(5);
-            command("time set night");
-            serverBedUses.set(0);
-            clientBedUses.set(0);
+            assertBedsInView("with the red bed nearer", redBed, blueBed);
+            startScenario("nearest-bed-red", "Day, the same two beds, the red one nearer: nothing happens.",
+                    "Night falls: it walks to the red bed and sleeps.");
+            assertStaysStill("by day, with the red bed nearer", DAY_CHECK_TICKS);
+            nightFalls();
+            assertWalksAtOnce();
             assertOutOfReach("before walking to the red bed");
             fallAsleepIn(redBed, "when the red bed is nearest", WALK_AND_SLEEP_TIMEOUT_TICKS);
             sleepThroughTheNight();
@@ -220,10 +204,69 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
         }
     }
 
-    private static void placeBed(ServerLevel level, BlockPos head, Block bed) {
-        BlockState state = bed.defaultBlockState().setValue(BedBlock.FACING, Direction.SOUTH);
-        level.setBlockAndUpdate(head.relative(Direction.NORTH), state.setValue(BedBlock.PART, BedPart.FOOT));
-        level.setBlockAndUpdate(head, state.setValue(BedBlock.PART, BedPart.HEAD));
+    /**
+     * Loads the pre-built scene, a saved structure, and checks the beds landed where the scenarios expect them: a moved
+     * structure would otherwise show up only as a walk to the wrong place.
+     */
+    private void placeScene(ServerLevel level) {
+        StructureTemplate scene = level.getServer().getStructureManager().get(SCENE)
+                .orElseThrow(() -> new AssertionError("The test scene " + SCENE + " is missing."));
+        BlockPos corner = redBed.offset(SCENE_CORNER_FROM_RED_BED);
+        scene.placeInWorld(level, corner, corner, new StructurePlaceSettings(), level.getRandom(), Block.UPDATE_ALL);
+        for (BlockPos head : new BlockPos[]{redBed, blueBed}) {
+            BlockState state = level.getBlockState(head);
+            if (!(state.getBlock() instanceof BedBlock) || state.getValue(BedBlock.PART) != BedPart.HEAD
+                    || state.getValue(BedBlock.FACING) != Direction.SOUTH) {
+                throw new AssertionError("Expected the scene to put a bed's head, facing south, at " + head
+                        + ", but found " + state + ".");
+            }
+        }
+        if (level.getBlockState(redBed).getBlock() != Blocks.RED_BED
+                || level.getBlockState(blueBed).getBlock() != Blocks.BLUE_BED) {
+            throw new AssertionError("Expected the red bed at " + redBed + " and the blue bed at " + blueBed + ".");
+        }
+    }
+
+    /**
+     * Sets daylight, lets the player settle where the scenario put them, empties the chat and only then prints the
+     * step marker: the cut starts after the marker, so the clip opens on the finished scene.
+     */
+    private void startScenario(String id, String title, String expected) {
+        command("time set day");
+        context.waitTicks(SETTLE_TICKS);
+        serverBedUses.set(0);
+        clientBedUses.set(0);
+        clearChat();
+        step(id, title, expected);
+    }
+
+    /** Dusk, ten ticks before night, then waits until the client sees night. */
+    private void nightFalls() {
+        command("time set " + TEN_TICKS_BEFORE_NIGHT);
+        int ticksToNight = context.waitFor(client -> client.level.isDarkOutside(), 100);
+        ClientGameTestRecordingHud.log("Night fell after " + ticksToNight + " ticks of dusk");
+    }
+
+    private void assertWalksAtOnce() {
+        int ticksToWalk = context.waitFor(client -> hasBaritoneGoal(), 20);
+        if (ticksToWalk > TICKS_TO_ACT) {
+            throw new AssertionError("Expected the walk to start within " + TICKS_TO_ACT + " ticks of the client"
+                    + " seeing night, but it started " + ticksToWalk + " ticks later.");
+        }
+        ClientGameTestRecordingHud.log("Walking on tick " + ticksToWalk + " of the night");
+    }
+
+    /** The in-reach scenario's bed is in view but not under the crosshair, so the mod has to turn to it. */
+    private void assertCrosshairOffTheBed() {
+        String onBed = context.computeOnClient(client -> {
+            HitResult crosshair = client.player.raycastHitResult(1.0F, client.player);
+            return crosshair instanceof BlockHitResult looked
+                    && client.level.getBlockState(looked.getBlockPos()).getBlock() instanceof BedBlock
+                    ? looked.getBlockPos().toShortString() : null;
+        });
+        if (onBed != null) {
+            throw new AssertionError("Expected the crosshair beside the red bed, but it is on the bed at " + onBed + ".");
+        }
     }
 
     /**
@@ -245,11 +288,11 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
     }
 
     /**
-     * Both beds are on camera when every corner of both halves of each is inside the view and the middle is not
-     * hidden. The corners matter: a bed that is half out of the frame is not "on screen".
+     * A bed is on camera when every corner of both its halves is inside the view and its middle is not hidden. The
+     * corners matter: a bed that is half out of the frame is not "on screen".
      */
-    private void assertBothBedsInView(String when) {
-        for (BlockPos bed : new BlockPos[]{redBed, blueBed}) {
+    private void assertBedsInView(String when, BlockPos... beds) {
+        for (BlockPos bed : beds) {
             String problem = context.computeOnClient(client -> {
                 LocalPlayer player = client.player;
                 Vec3 eye = player.getEyePosition();
@@ -280,10 +323,10 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
             if (problem != null) {
                 String view = context.computeOnClient(client -> " (player at " + client.player.position()
                         + ", looking " + client.player.getYRot() + "/" + client.player.getXRot() + ")");
-                throw new AssertionError("Expected both beds fully on camera " + when + ", but " + problem + view + ".");
+                throw new AssertionError("Expected the bed fully on camera " + when + ", but " + problem + view + ".");
             }
         }
-        ClientGameTestRecordingHud.log("Both beds on camera " + when);
+        ClientGameTestRecordingHud.log((beds.length == 1 ? "The bed is" : "Both beds are") + " on camera " + when);
     }
 
     /** The eight corners of each half of a bed: the block footprint's corners at its base and at its top. */
@@ -396,8 +439,6 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
     }
 
     private void assertStaysStill(String when, int ticks) {
-        // Let the player settle after a teleport before the position is taken as the one to stay at.
-        context.waitTicks(5);
         Vec3 start = context.computeOnClient(client -> client.player.position());
         float yaw = context.computeOnClient(client -> client.player.getYRot());
         float pitch = context.computeOnClient(client -> client.player.getXRot());
