@@ -25,20 +25,20 @@ Baritone is bundled in the mod's jar. For its own walks the mod sets Baritone's 
 Your own values of those settings come back when the walk ends. The mod never starts a walk while a Baritone task of yours (a `#goto`, `#goal` or `#mine`) is running, and never cancels one.
 The mod turns off Baritone's `chatControl`, so a chat message that starts with a Baritone command, such as "help me" or "stop", goes to the server as chat. Messages that start with `#` still go to Baritone.
 
-A Baritone command of yours runs as if the mod were not there. If the mod is walking you, the walk ends first and the mod leaves that bed alone until the next night, so `#stop` stops it for good and `#mine` or `#goto` start at once with your own settings.
+A Baritone command of yours runs as if the mod were not there, with your own settings, so `#mine` or `#goto` start at once as you set them up. If the mod is putting you to bed at the time (walking you, or waiting out monsters at a bed), the command takes over: the mod stops for the rest of the night and says so in chat, so `#stop` stops it for good. The next night it works again.
 Every command also sees your own `chatControl`, so `#set` saves only your own values to `baritone/settings.txt`, never the mod's.
 
-When you get out of bed, or something wakes you, while it is still night, the mod leaves you up until the next night, also after a trip to another dimension or a reconnect to the same world.
+When you get out of bed, or something wakes you, while it is still night, the mod leaves you up until the next day, also after a trip to another dimension or a reconnect to the same world. This holds only in the dimension and world where you left the bed: in another dimension where you may sleep, or on another server, the mod puts you to bed as usual.
 Waking up in the morning works the same way until your client sees the new day, which the server sends once a second.
 
 The mod waits, without turning your view, while you sneak with anything in either hand, because a right click then uses that item on the bed (placing a block on it, for example) instead of the bed.
 It does nothing while a screen is open (the pause menu, your inventory, the death screen) or while you are in spectator mode.
 
 If the crosshair cannot reach the bed (a floor, a wall or a cat in the way) or the server refuses it (someone else in it, a plugin), the mod tries that bed 3 times, tells you once in chat and leaves it alone until the next night.
-A bed that Baritone finds no way to, or does not reach within 30 seconds (behind a door the server will not open, for example), is left alone at once, with a message too. Either way the mod then tries the next nearest bed.
+A bed that Baritone finds no way to, or does not reach within 30 seconds of walking (behind a door the server will not open, for example), is left alone at once, with a message too. Time with a screen open (the pause menu, for example) does not count. Either way the mod then tries the next nearest bed.
 
 Using a bed sets your respawn point there, as your own right click does, even when the server then refuses sleep. The mod picks the nearest bed within 24 blocks, which may be a bed in a village or in someone else's base, so your respawn point can move to it.
-When the server refuses a bed because monsters are nearby, the mod keeps trying that bed, which now has your respawn point, until they are gone, and uses no other bed that night.
+When the server refuses a bed because monsters are nearby, that bed now has your respawn point, so the mod uses no other bed that night. It tries that bed again every 5 seconds while you are in reach, never walks you back to it, and after 30 seconds of monsters it tells you once and stops trying it.
 
 On a server the mod assumes that no datapack changes the bed rule of a vanilla dimension type, of a biome or through a timeline.
 
@@ -103,28 +103,37 @@ A use that fails any of those, or any use while the player is out of reach of th
 
 Each of those steps starts its night from a day, because a player woken at night stays up until the next night.
 
-`SafeguardsClientGameTest` checks, on a dedicated server, what the player keeps control of and what the mod does with a bed it cannot use. Each step builds its own stage by day and then sets midnight with time stopped.
+`SafeguardsClientGameTest` checks what the player keeps control of and what the mod does with a bed it cannot use: steps 19 to 44 on a dedicated server, step 45 in singleplayer. Each step builds its own stage by day and then sets midnight with time stopped.
 
 |Step|Id|Situation|Expected|
 |---|---|---|---|
 |19|`chat-reaches-the-server`|the player chats "help me", which starts with a Baritone command|the server receives the message|
-|20|`stays-up-after-leaving-the-bed`|a bed in reach, the player sleeps and then leaves the bed|no bed use for 10 s, nor after a trip to the Nether and back or a reconnect that night, then sleeps again the next night|
-|21|`sneaking-with-blocks`|a bed in reach, the player sneaking with planks in hand|no turn, no use and nothing placed on the bed, then sleeps once the player stops sneaking|
-|22|`sneak-before-the-click`|a bed in reach, planks in hand, the player starts sneaking on the tick the view turns to the bed|no use and nothing placed on the bed, then sleeps once the player stops sneaking|
-|23|`bed-under-the-floor`|the nearest bed under the floor the player stands on, an open bed 8 blocks away|tells the player once that it leaves the first bed alone, then sleeps in the open bed|
-|24|`crosshair-short-of-the-bed`|a bed in reach whose centre is beyond the 4.5-block interaction range, so the game's pick ends above it|never uses it, tells the player once, then leaves the view alone|
-|25|`server-refuses-the-bed`|a bed in reach that the server refuses, another bed 8 blocks away|3 uses of the first bed, tells the player once, then sleeps in the other bed|
-|26|`monsters-nearby`|a bed in reach with a monster beside it, another bed 11 blocks away|keeps trying the first bed, never the other, no message, sleeps in the first bed once the monster is gone|
-|27|`bed-in-a-pit`|the nearest bed at the bottom of a 6-block shaft, a water bucket in hand, an open bed farther away|no water ever in the shaft, full health, tells the player once that it found no way to the first bed, sleeps in the open bed|
-|28|`walk-never-arrives`|the nearest bed in a room whose door the server keeps shut, an open bed farther away|gives the room bed up after 30 s, tells the player once, sleeps in the open bed|
-|29|`walk-switches-beds`|a bed 12 blocks away, and a nearer bed beside the path once the walk starts|sleeps in the nearer bed, and the player's own `allowBreak`, `allowPlace` and `allowWaterBucketFall` are back afterwards|
-|30|`own-baritone-goal`|the player's own Baritone goal set by day, then nightfall|keeps the player's goal at night and at daybreak, turns off `allowBreak`, `allowPlace` and `allowWaterBucketFall` only during its own walk, and gives them back after sleeping|
-|31|`goal-from-another-mod`|another mod sends Baritone elsewhere through its API during the mod's walk|leaves that walk alone: the player arrives there|
-|32|`stop-ends-the-walk`|a bed out of reach, the player types `#stop` during the walk|the player's settings are back, no walk and no use for the rest of the night, sleeps the next night|
-|33|`mine-during-the-walk`|the player types `#mine stone` during the mod's walk|Baritone mines, with the player's own settings|
-|34|`settings-file`|the player saves a Baritone setting by day, then a walk, a `#set` during a walk, a reconnect and a trip to the Nether during walks|`baritone/settings.txt` read from disk: the same bytes after the walk and after each later `#set` of the same value, only the typed setting changed after the `#set` during the walk, and never the mod's values|
-|35|`screen-open`|a bed in reach, the inventory open|no turn and no use while it is open, sleeps once it is closed|
-|36|`spectator`|a bed in reach, the player in spectator mode|no turn and no use, sleeps once back in survival|
+|20|`stays-up-after-leaving-the-bed`|a bed in reach, the player sleeps and then leaves the bed|no bed use for 10 s, nor after a trip to the Nether and back (the Overworld's time held back 5 ticks on the way back, as a network can) or a reconnect that night, then sleeps again the next night|
+|21|`stays-up-in-its-own-dimension`|the player leaves the bed, then goes to a second dimension of the Overworld's type with a bed in reach|sleeps there|
+|22|`stay-up-ends-the-next-day`|the player leaves the bed, the next day and the next night pass while they are in the Nether|back in the Overworld, sleeps in the bed|
+|23|`stays-up-in-its-own-world`|the player leaves the bed, then joins the server under another address|sleeps there|
+|24|`sneaking-with-blocks`|a bed in reach, the player sneaking with planks in hand|no turn, no use and nothing placed on the bed, then sleeps once the player stops sneaking|
+|25|`sneak-before-the-click`|a bed in reach, planks in hand, the player starts sneaking on the tick the view turns to the bed|no use and nothing placed on the bed, then sleeps once the player stops sneaking|
+|26|`bed-under-the-floor`|the nearest bed under the floor the player stands on, an open bed 8 blocks away|tells the player once that it leaves the first bed alone, then sleeps in the open bed|
+|27|`crosshair-short-of-the-bed`|a bed in reach whose centre is beyond the 4.5-block interaction range, so the game's pick ends above it|never uses it, tells the player once, then leaves the view alone|
+|28|`server-refuses-the-bed`|a bed in reach that the server refuses, another bed 8 blocks away|3 uses of the first bed, tells the player once, then sleeps in the other bed|
+|29|`monsters-nearby`|a bed in reach with a monster beside it, another bed 11 blocks away|tries the first bed every 5 s, never the other, no message, sleeps in the first bed once the monster is gone|
+|30|`monster-stays`|the same, the monster never leaves|after 30 s tells the player once and stops trying, never the other bed|
+|31|`monster-walk-away`|the same, the player moves 11 blocks away after the first refusal|no walk back and no use|
+|32|`monster-stop`|the same, the player types `#stop` after the first refusal|no use, tells the player once|
+|33|`monster-bed-broken`|the same, the first bed is broken after the first refusal|sleeps in the other bed|
+|34|`bed-in-a-pit`|the nearest bed at the bottom of a 6-block shaft, a water bucket in hand, an open bed farther away|no water ever in the shaft, full health, tells the player once that it found no way to the first bed, sleeps in the open bed|
+|35|`walk-never-arrives`|the nearest bed in a room whose door the server keeps shut, an open bed farther away|gives the room bed up after 30 s, tells the player once, sleeps in the open bed|
+|36|`walk-switches-beds`|a bed 12 blocks away, and a nearer bed beside the path once the walk starts|sleeps in the nearer bed, and the player's own `allowBreak`, `allowPlace` and `allowWaterBucketFall` are back afterwards|
+|37|`own-baritone-goal`|the player's own Baritone goal set by day, then nightfall|keeps the player's goal at night and at daybreak, turns off `allowBreak`, `allowPlace` and `allowWaterBucketFall` only during its own walk, and gives them back after sleeping|
+|38|`goal-from-another-mod`|another mod sends Baritone elsewhere through its API during the mod's walk|leaves that walk alone: the player arrives there|
+|39|`stop-ends-the-walk`|two beds out of reach, the player types `#stop` during the walk to the nearer one|the player's settings are back, tells the player once, no walk and no use for the rest of the night, sleeps the next night|
+|40|`mine-during-the-walk`|the player types `#mine stone` during the mod's walk|Baritone mines, with the player's own settings|
+|41|`settings-file`|the player saves a Baritone setting by day, then a walk, a `#set` during a walk, a reconnect and a trip to the Nether during walks, then `#modified`, `#reset all` and `#set` by day|`baritone/settings.txt` read from disk: the same bytes after the walk and after each later `#set` of the same value, only the typed setting changed after the `#set` during the walk, only `chatDebug true` after `#reset all` and `#set`, and never the mod's values|
+|42|`own-chat-control`|the player turns `chatControl` off with `#set`, then sets another setting|the file keeps the player's `chatControl false`|
+|43|`screen-open`|a bed in reach, the inventory open|no turn and no use while it is open, sleeps once it is closed|
+|44|`spectator`|a bed in reach, the player in spectator mode|no turn and no use, sleeps once back in survival|
+|45|`walk-paused`|singleplayer, a bed out of reach, the pause menu open for 31 s during the walk|no message, sleeps in that bed once the menu is closed|
 
 ```shell
 ./gradlew runClientGameTest
