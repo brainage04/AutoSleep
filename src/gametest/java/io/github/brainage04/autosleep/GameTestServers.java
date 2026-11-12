@@ -6,12 +6,12 @@ import java.net.ServerSocket;
 import java.util.Properties;
 
 final class GameTestServers {
-    private GameTestServers() {
-    }
+    private GameTestServers() {}
 
     /**
-     * Short view and simulation distances, and a free port: two runs on one host would otherwise both bind the default
-     * port, and the second one's server fails to start (as MinecraftModConventions' {@code findAvailablePort} avoids).
+     * Short view and simulation distances, and a free port: two runs on one host would otherwise
+     * both bind the default port, and the second one's server fails to start (as
+     * MinecraftModConventions' {@code findAvailablePort} avoids).
      */
     static Properties serverProperties() {
         Properties properties = new Properties();

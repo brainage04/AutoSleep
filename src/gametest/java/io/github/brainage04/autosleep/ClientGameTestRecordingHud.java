@@ -1,5 +1,8 @@
 package io.github.brainage04.autosleep;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.minecraft.client.DeltaTracker;
@@ -8,17 +11,15 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.resources.Identifier;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.List;
-
 /**
- * The recording panel of MinecraftModConventions' {@code ClientGameTestRecordingHud}, drawn with the 1.21.11 GUI API
- * (the conventions runtime itself needs Minecraft 26.2): the current step's id, title and expected result, and the last
- * few things the test saw, in the top-right corner clear of chat.
+ * The recording panel of MinecraftModConventions' {@code ClientGameTestRecordingHud}, drawn with
+ * the 1.21.11 GUI API (the conventions runtime itself needs Minecraft 26.2): the current step's id,
+ * title and expected result, and the last few things the test saw, in the top-right corner clear of
+ * chat.
  */
 public final class ClientGameTestRecordingHud {
-    private static final Identifier HUD_ID = Identifier.fromNamespaceAndPath(AutoSleep.MOD_ID, "gametest_recording_feedback");
+    private static final Identifier HUD_ID =
+            Identifier.fromNamespaceAndPath(AutoSleep.MOD_ID, "gametest_recording_feedback");
     private static final int SCREEN_MARGIN = 5;
     private static final int PANEL_PADDING = 4;
     private static final int LINE_GAP = 2;
@@ -35,17 +36,25 @@ public final class ClientGameTestRecordingHud {
     private static volatile Step currentStep;
     private static int stepNumber;
 
-    private ClientGameTestRecordingHud() {
-    }
+    private ClientGameTestRecordingHud() {}
 
     static void register() {
-        HudElementRegistry.attachElementBefore(VanillaHudElements.SCOREBOARD, HUD_ID, ClientGameTestRecordingHud::render);
+        HudElementRegistry.attachElementBefore(
+                VanillaHudElements.SCOREBOARD, HUD_ID, ClientGameTestRecordingHud::render);
     }
 
     static void step(String id, String title, String expected) {
         stepNumber++;
         String numberedId = stepNumber + ". " + id;
-        System.out.println("[CLIENT_GAMETEST_RECORDER] " + System.currentTimeMillis() + " " + numberedId + " | " + title + " | " + expected);
+        System.out.println(
+                "[CLIENT_GAMETEST_RECORDER] "
+                        + System.currentTimeMillis()
+                        + " "
+                        + numberedId
+                        + " | "
+                        + title
+                        + " | "
+                        + expected);
         showStep(numberedId, title, expected);
     }
 
@@ -60,8 +69,10 @@ public final class ClientGameTestRecordingHud {
         if (cleaned.isBlank()) {
             return;
         }
-        // The epoch millis let the recording be trimmed against this log; the recorded capture starts at ffmpeg-start.
-        System.out.println("[CLIENT_GAMETEST_RECORDER] " + System.currentTimeMillis() + " - " + cleaned);
+        // The epoch millis let the recording be trimmed against this log; the recorded capture
+        // starts at ffmpeg-start.
+        System.out.println(
+                "[CLIENT_GAMETEST_RECORDER] " + System.currentTimeMillis() + " - " + cleaned);
         addLogLine(cleaned);
     }
 
@@ -82,8 +93,15 @@ public final class ClientGameTestRecordingHud {
 
         Font font = client.font;
         int screenWidth = client.getWindow().getGuiScaledWidth();
-        int maxWidth = Math.min(MAX_WIDTH, screenWidth - DayNightCycleHud.rightEdge(client) - SCREEN_MARGIN * 2 - PANEL_PADDING * 2);
-        // Long lines wrap instead of ending in an ellipsis: a caption that is cut off tells the viewer nothing.
+        int maxWidth =
+                Math.min(
+                        MAX_WIDTH,
+                        screenWidth
+                                - DayNightCycleHud.rightEdge(client)
+                                - SCREEN_MARGIN * 2
+                                - PANEL_PADDING * 2);
+        // Long lines wrap instead of ending in an ellipsis: a caption that is cut off tells the
+        // viewer nothing.
         List<String> texts = new ArrayList<>();
         List<Integer> colors = new ArrayList<>();
         for (HudLine line : lines()) {
@@ -106,7 +124,8 @@ public final class ClientGameTestRecordingHud {
 
         int textY = panelY + PANEL_PADDING;
         for (int index = 0; index < texts.size(); index++) {
-            graphics.drawString(font, texts.get(index), panelX + PANEL_PADDING, textY, colors.get(index), true);
+            graphics.drawString(
+                    font, texts.get(index), panelX + PANEL_PADDING, textY, colors.get(index), true);
             textY += lineHeight;
         }
     }
@@ -170,9 +189,7 @@ public final class ClientGameTestRecordingHud {
         return value == null ? "" : value.strip().replace('\n', ' ');
     }
 
-    private record Step(String id, String title, String subtitle) {
-    }
+    private record Step(String id, String title, String subtitle) {}
 
-    private record HudLine(String text, int color) {
-    }
+    private record HudLine(String text, int color) {}
 }
