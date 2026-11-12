@@ -1,6 +1,6 @@
 # AutoSleep
 
-A client-side Fabric mod for Minecraft 1.21.11: whenever the game would let you sleep (at night, or in a thunderstorm, in the Overworld) and you are not already in bed, it puts you to sleep in the nearest bed, walking you there if it is out of reach.
+AutoSleep is a client-side Fabric mod for Minecraft 1.21.11. Whenever the game would let you sleep (at night, or in a thunderstorm, in the Overworld) and you are not already in bed, it puts you to sleep in the nearest bed, walking you there if it is out of reach.
 
 It uses the bed for you exactly as a right click would, so it works on any server, including vanilla servers without the mod.
 
