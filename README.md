@@ -29,6 +29,7 @@ A Baritone command of yours runs as if the mod were not there, with your own set
 Every command also sees your own `chatControl`, so `#set` saves only your own values to `baritone/settings.txt`, never the mod's.
 
 When you get out of bed, or something wakes you, while it is still night, the mod leaves you up until the next day, also after a trip to another dimension or a reconnect to the same world. This holds only in the dimension and world where you left the bed: in another dimension where you may sleep, or on another server, the mod puts you to bed as usual.
+The mod tells worlds apart by the save folder of a singleplayer world or by the server address, so two different worlds behind one address count as one world: a night the mod recorded in one can carry into the other while both are on the same day number.
 Waking up in the morning works the same way until your client sees the new day, which the server sends once a second.
 
 The mod waits, without turning your view, while you sneak with anything in either hand, because a right click then uses that item on the bed (placing a block on it, for example) instead of the bed.
@@ -39,6 +40,8 @@ A bed that Baritone finds no way to, or does not reach within 30 seconds of walk
 
 Using a bed sets your respawn point there, as your own right click does, even when the server then refuses sleep. The mod picks the nearest bed within 24 blocks, which may be a bed in a village or in someone else's base, so your respawn point can move to it.
 When the server refuses a bed because monsters are nearby, that bed now has your respawn point, so the mod uses no other bed in that world that night, in any dimension, also after a trip to another dimension or a reconnect. It tries that bed again every 5 seconds while you are in reach, never walks you back to it, and after 30 seconds of monsters it tells you once and stops trying it. The 30 seconds run on while a screen is open, since the world goes on behind it, but not while a singleplayer game is paused. The next day the mod uses beds as usual again.
+A bed that someone breaks while you are away still counts as there: the mod cannot tell until you are near it again, so that night can go unused.
+On a server whose world time never advances, the day number never changes, so the mod stops using beds in that world until you restart the game.
 
 On a server the mod assumes that no datapack changes the bed rule of a vanilla dimension type, of a biome or through a timeline.
 
