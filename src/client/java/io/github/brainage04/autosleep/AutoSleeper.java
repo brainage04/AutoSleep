@@ -3,27 +3,38 @@ package io.github.brainage04.autosleep;
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.Settings;
+import baritone.api.command.ICommand;
+import baritone.api.command.registry.Registry;
 import baritone.api.event.events.PathEvent;
 import baritone.api.event.listener.AbstractGameEventListener;
 import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalGetToBlock;
 import baritone.api.process.IBaritoneProcess;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import net.minecraft.SharedConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.attribute.BedRule;
 import net.minecraft.world.attribute.EnvironmentAttributes;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BedPart;
+import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -53,6 +64,18 @@ public final class AutoSleeper {
     static final String BED_UNUSABLE_MESSAGE = "autosleep.message.bed_unusable";
     static final String BED_UNREACHABLE_MESSAGE = "autosleep.message.bed_unreachable";
 
+    /**
+     * Ticks a walk may take before its bed is given up for the night, for a walk that never arrives
+     * and never fails, such as one to a door the server will not open: Baritone then times the door
+     * movement out after its estimate plus {@code movementTimeoutTicks} (100 by default,
+     * PathExecutor.java:242-249 in Baritone 1.17.0) and plans the same path again, every 6 s in the
+     * {@code walk-never-arrives} GameTest step. 30 s gives Baritone five such re-plans, and covers
+     * about 130 blocks of walking at its cost of 4.63 ticks a block (ActionCosts.java:25), almost 4
+     * times the distance to the farthest bed the search finds (35 blocks, a corner of the search
+     * box).
+     */
+    static final int WALK_DEADLINE_TICKS = 600;
+
     private static final int SEARCH_RADIUS_HORIZONTAL = 24;
     private static final int SEARCH_RADIUS_VERTICAL = 6;
 
@@ -65,19 +88,42 @@ public final class AutoSleeper {
 
     private static final double BED_RANGE_VERTICAL = 2.0D;
 
+    /**
+     * A new client level, after a dimension change or a reconnect, starts at day time 0 until the
+     * server's time arrives, which the server sends to every player once a second
+     * (MinecraftServer.java:1109-1111 in 1.21.11).
+     */
+    private static final int TIME_SYNC_TICKS = 20;
+
     private int cooldownTicks;
     private boolean wasSleeping;
+
+    /** The level of the last tick, and the ticks the client has been in it. */
+    private @Nullable ClientLevel lastLevel;
+
+    private int levelTicks;
 
     /** Whether the last tick's answer to "would the game let me sleep here" was yes. */
     private boolean maySleepHere;
 
     /**
      * The player got out of bed or was woken while the game still lets them sleep: no bed until the
-     * game next refuses sleep, at daybreak. Waking up in the morning sets it too, which keeps the
-     * player up until the client sees the new day: the server sends the day time only once a
-     * second.
+     * game refuses sleep in that dimension or a later day starts there, in the same world. A trip
+     * to another dimension or a reconnect keeps it. Waking up in the morning sets it too, which
+     * keeps the player up until the client sees the new day: the server sends the day time only
+     * once a second.
      */
-    private boolean stayingUp;
+    private @Nullable StayUp stayUp;
+
+    /**
+     * The bed the server refused because monsters are nearby. The use set the respawn point there
+     * (ServerPlayer.java:1192-1196 in 1.21.11, before the monster check), so the mod keeps to this
+     * bed until the next night rather than move the respawn point to another one.
+     */
+    private @Nullable Question notSafeBed;
+
+    /** The player's own {@code chatControl}, kept off while the mod runs. */
+    private boolean playerChatControl;
 
     /** Tonight's failed tries per bed; a bed at {@link #TRIES_PER_BED} is left alone. */
     private final Map<Question, Integer> failedTries = new HashMap<>();
@@ -92,6 +138,9 @@ public final class AutoSleeper {
     private @Nullable Question usedBed;
 
     private @Nullable Walk walk;
+
+    /** Ticks since the current walk started. */
+    private int walkTicks;
 
     /** Baritone found no way to the bed of the current walk. */
     private boolean walkFailed;
@@ -109,7 +158,10 @@ public final class AutoSleeper {
         // me", "stop", "come here") instead of sending it; its own comment asks for it to be off
         // when Baritone is used inside another mod (Settings.java:681-685 in Baritone 1.17.0).
         // Messages starting with its prefix (#) still go to Baritone.
-        BaritoneAPI.getSettings().chatControl.value = false;
+        Settings settings = BaritoneAPI.getSettings();
+        playerChatControl = settings.chatControl.value;
+        settings.chatControl.value = false;
+        wrapCommands();
         baritone()
                 .getGameEventHandler()
                 .registerEventListener(
@@ -129,10 +181,16 @@ public final class AutoSleeper {
         LocalPlayer player = minecraft.player;
         ClientLevel level = minecraft.level;
         boolean sleeping = player != null && player.isSleeping();
-        if (wasSleeping && !sleeping) {
-            stayingUp = true;
+        if (wasSleeping && !sleeping && player != null && level != null) {
+            stayUp = new StayUp(world(minecraft), level.dimension(), dayOf(level));
         }
         wasSleeping = sleeping;
+        if (level != lastLevel) {
+            lastLevel = level;
+            levelTicks = 0;
+        } else {
+            levelTicks++;
+        }
 
         if (player == null || level == null || minecraft.gameMode == null) {
             endWalk();
@@ -157,6 +215,11 @@ public final class AutoSleeper {
                 server != null
                         ? clientRuleAllows(level, player.blockPosition())
                         : remoteServerAllows(level, player.blockPosition());
+        if (stayUp != null
+                && levelTicks > TIME_SYNC_TICKS
+                && stayUp.isOver(world(minecraft), level, allowedNow)) {
+            stayUp = null;
+        }
         if (!allowedNow) {
             stopWalking();
             startNewNight();
@@ -169,21 +232,23 @@ public final class AutoSleeper {
             maySleepHere = true;
             cooldownTicks = 0;
         }
-        if (stayingUp) {
+        if (stayUp != null) {
             return;
         }
 
-        if (walk != null && (walkFailed || !ownsWalk(walk))) {
+        if (walk != null) {
             Walk ended = walk;
-            boolean failed = walkFailed;
-            stopWalking();
-            if (failed) {
+            if (walkFailed || ++walkTicks > WALK_DEADLINE_TICKS) {
+                stopWalking();
                 fail(player, ended.bed(), TRIES_PER_BED, BED_UNREACHABLE_MESSAGE);
                 cooldownTicks = 0;
-            } else if (inReach(player, ended.target())) {
-                // The walk has just stopped beside the bed: use it on this tick rather than
-                // standing next to it until the next retry.
-                cooldownTicks = 0;
+            } else if (!ownsWalk(ended)) {
+                stopWalking();
+                if (inReach(player, ended.target())) {
+                    // The walk has just stopped beside the bed: use it on this tick rather than
+                    // standing next to it until the next retry.
+                    cooldownTicks = 0;
+                }
             }
         }
         if (minecraft.screen != null || player.isSpectator() || walk == null && baritoneBusy()) {
@@ -306,16 +371,67 @@ public final class AutoSleeper {
         return failedTries.getOrDefault(bed, 0) >= TRIES_PER_BED;
     }
 
+    /**
+     * Watches the action bar for the server's answer to the last use. "Monsters nearby" does not
+     * count as a failed try: the bed is kept and tried again until they are gone.
+     */
+    public void onGameMessage(Component message, boolean overlay) {
+        Component notSafe = Player.BedSleepingProblem.NOT_SAFE.message();
+        if (overlay
+                && usedBed != null
+                && notSafe != null
+                && message.getContents().equals(notSafe.getContents())) {
+            notSafeBed = usedBed;
+            usedBed = null;
+        }
+    }
+
     /** Forgets everything about the night that has ended. */
     private void startNewNight() {
-        stayingUp = false;
         failedTries.clear();
+        notSafeBed = null;
         aim = null;
         usedBed = null;
         // An answer from the integrated server holds for the next attempt only, never for the next
         // night.
         lastQuestion = null;
         serverAnswer = null;
+    }
+
+    /**
+     * Puts every Baritone command in a {@link PlayerCommand}, keeping their order: the command
+     * manager runs the first registered command with the typed name (CommandManager.java:67-73 in
+     * Baritone 1.17.0), and a registry prepends what it registers (Registry.java:20-27).
+     */
+    private void wrapCommands() {
+        Registry<ICommand> registry = baritone().getCommandManager().getRegistry();
+        List<ICommand> commands = new ArrayList<>(registry.entries);
+        commands.forEach(registry::unregister);
+        for (ICommand command : commands.reversed()) {
+            registry.register(new PlayerCommand(command, this));
+        }
+    }
+
+    /**
+     * A Baritone command of the player's (typed, clicked in chat or run by another mod) runs as if
+     * AutoSleep were not there: the mod's walk ends first and its bed is left alone until the next
+     * night, and the player's own settings are in place, so {@code #mine} can break blocks and
+     * {@code #set} saves the player's values to {@code baritone/settings.txt} (SetCommand.java:205
+     * saves every changed setting), never the mod's.
+     */
+    void beforePlayerCommand() {
+        BaritoneAPI.getSettings().chatControl.value = playerChatControl;
+        if (walk != null) {
+            failedTries.put(walk.bed(), TRIES_PER_BED);
+            stopWalking();
+        }
+    }
+
+    /** Keeps what the command did to {@code chatControl} as the player's own value. */
+    void afterPlayerCommand() {
+        Settings settings = BaritoneAPI.getSettings();
+        playerChatControl = settings.chatControl.value;
+        settings.chatControl.value = false;
     }
 
     /**
@@ -398,8 +514,16 @@ public final class AutoSleeper {
                 : bed.relative(state.getValue(BedBlock.FACING));
     }
 
-    /** The nearest bed block that has not been given up tonight. */
+    /**
+     * The nearest bed block that has not been given up tonight; only the bed refused for monsters
+     * nearby, while it is still there.
+     */
     private @Nullable BlockPos findNearestBed(ClientLevel level, LocalPlayer player) {
+        if (notSafeBed != null
+                && !(notSafeBed.level() == level
+                        && level.getBlockState(notSafeBed.head()).getBlock() instanceof BedBlock)) {
+            notSafeBed = null;
+        }
         BlockPos origin = player.blockPosition();
         BlockPos nearest = null;
         double nearestDistance = Double.MAX_VALUE;
@@ -414,9 +538,12 @@ public final class AutoSleeper {
                                 SEARCH_RADIUS_VERTICAL,
                                 SEARCH_RADIUS_HORIZONTAL))) {
             double distance = player.position().distanceToSqr(Vec3.atBottomCenterOf(pos));
-            if (distance < nearestDistance
-                    && level.getBlockState(pos).getBlock() instanceof BedBlock
-                    && !givenUp(new Question(level, bedHead(level, pos)))) {
+            if (distance >= nearestDistance
+                    || !(level.getBlockState(pos).getBlock() instanceof BedBlock)) {
+                continue;
+            }
+            Question bed = new Question(level, bedHead(level, pos));
+            if (!givenUp(bed) && (notSafeBed == null || notSafeBed.equals(bed))) {
                 nearest = pos.immutable();
                 nearestDistance = distance;
             }
@@ -449,6 +576,7 @@ public final class AutoSleeper {
         settings.allowWaterBucketFall.value = false;
         Goal goal = new GoalGetToBlock(target);
         walk = new Walk(bed, target, goal, saved);
+        walkTicks = 0;
         walkFailed = false;
         baritone().getCustomGoalProcess().setGoalAndPath(goal);
     }
@@ -498,6 +626,31 @@ public final class AutoSleeper {
     private record Aim(Question bed, BlockPos target) {}
 
     private record Walk(Question bed, BlockPos target, Goal goal, SavedSettings saved) {}
+
+    /** Where and on which day the player chose to stay up; see {@link #stayUp}. */
+    private record StayUp(@Nullable Object world, ResourceKey<Level> dimension, long day) {
+        boolean isOver(@Nullable Object currentWorld, ClientLevel level, boolean allowedNow) {
+            return !Objects.equals(world, currentWorld)
+                    || level.dimension().equals(dimension) && (!allowedNow || dayOf(level) != day);
+        }
+    }
+
+    /**
+     * The world the client is in: the save folder of a singleplayer or LAN host's world, or the
+     * server's address.
+     */
+    private static @Nullable Object world(Minecraft minecraft) {
+        IntegratedServer server = minecraft.getSingleplayerServer();
+        if (server != null) {
+            return server.getWorldPath(LevelResource.ROOT);
+        }
+        ServerData serverData = minecraft.getCurrentServer();
+        return serverData != null ? serverData.ip : null;
+    }
+
+    private static long dayOf(ClientLevel level) {
+        return level.getDayTime() / SharedConstants.TICKS_PER_GAME_DAY;
+    }
 
     /** The player's own values of the Baritone settings a walk changes. */
     private record SavedSettings(

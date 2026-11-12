@@ -3,6 +3,7 @@ package io.github.brainage04.autosleep;
 import java.util.concurrent.atomic.AtomicBoolean;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.minecraft.network.chat.Component;
 
@@ -24,6 +25,7 @@ public class AutoSleepClient implements ClientModInitializer {
             try {
                 AutoSleeper autoSleeper = new AutoSleeper();
                 ClientTickEvents.END_CLIENT_TICK.register(autoSleeper::tick);
+                ClientReceiveMessageEvents.GAME.register(autoSleeper::onGameMessage);
                 AutoSleep.LOGGER.info("{} client initialised.", AutoSleep.MOD_NAME);
                 return;
             } catch (LinkageError e) {
