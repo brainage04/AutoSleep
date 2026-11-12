@@ -1,7 +1,9 @@
 package io.github.brainage04.autosleep.mixin;
 
+import io.github.brainage04.autosleep.ChunkPacketHold;
 import io.github.brainage04.autosleep.TimePacketHold;
 import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 import net.minecraft.network.protocol.game.ClientboundSetTimePacket;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -13,6 +15,14 @@ public abstract class ClientPacketListenerMixin {
     @Inject(method = "handleSetTime", at = @At("HEAD"), cancellable = true)
     private void autosleep$holdTheTime(ClientboundSetTimePacket packet, CallbackInfo callback) {
         if (TimePacketHold.hold(packet)) {
+            callback.cancel();
+        }
+    }
+
+    @Inject(method = "handleLevelChunkWithLight", at = @At("HEAD"), cancellable = true)
+    private void autosleep$holdTheChunk(
+            ClientboundLevelChunkWithLightPacket packet, CallbackInfo callback) {
+        if (ChunkPacketHold.hold(packet)) {
             callback.cancel();
         }
     }

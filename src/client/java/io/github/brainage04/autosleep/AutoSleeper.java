@@ -80,15 +80,14 @@ public final class AutoSleeper {
     static final int NOT_SAFE_GIVE_UP_TICKS = 600;
 
     /**
-     * Ticks a walk may take before its bed is given up for the night, counting only the ticks in
-     * which the player could act (no screen open, not in spectator mode), for a walk that never
-     * arrives and never fails, such as one to a door the server will not open: Baritone then times
-     * the door movement out after its estimate plus {@code movementTimeoutTicks} (100 by default,
-     * PathExecutor.java:242-249 in Baritone 1.17.0) and plans the same path again, every 6 s in the
-     * {@code walk-never-arrives} GameTest step. 30 s gives Baritone five such re-plans, and covers
-     * about 130 blocks of walking at its cost of 4.63 ticks a block (ActionCosts.java:25), almost 4
-     * times the distance to the farthest bed the search finds (35 blocks, a corner of the search
-     * box).
+     * Ticks a walk may take before its bed is given up for the night, counted on {@link
+     * Clock#PLAYER}, for a walk that never arrives and never fails, such as one to a door the
+     * server will not open: Baritone then times the door movement out after its estimate plus
+     * {@code movementTimeoutTicks} (100 by default, PathExecutor.java:242-249 in Baritone 1.17.0)
+     * and plans the same path again, every 6 s in the {@code walk-never-arrives} GameTest step. 30
+     * s gives Baritone five such re-plans, and covers about 130 blocks of walking at its cost of
+     * 4.63 ticks a block (ActionCosts.java:25), almost 4 times the distance to the farthest bed the
+     * search finds (35 blocks, a corner of the search box).
      */
     static final int WALK_DEADLINE_TICKS = 600;
 
@@ -114,10 +113,18 @@ public final class AutoSleeper {
      */
     static final int TIME_SYNC_TICKS = 20;
 
+    /**
+     * Ticks until the next attempt, counted on {@link Clock#PLAYER}: {@link #tick} returns before
+     * the count in any other tick, as the mod cannot right-click then.
+     */
     private int cooldownTicks;
+
     private boolean wasSleeping;
 
-    /** The level of the last tick, and the ticks the client has been in it. */
+    /**
+     * The level of the last tick, and the ticks the client has been in it, counted on {@link
+     * Clock#WORLD}: the server sends its time only while the world runs.
+     */
     private @Nullable ClientLevel lastLevel;
 
     private int levelTicks;
@@ -133,18 +140,23 @@ public final class AutoSleeper {
      * are used as usual. Waking up in the morning sets it too, which keeps the player up until the
      * client sees the new day: the server sends the day time only once a second.
      */
-    private @Nullable StayUp stayUp;
+    private @Nullable Night stayUp;
 
     /**
      * The bed the server refused because monsters are nearby. The use set the respawn point there
      * (ServerPlayer.java:1192-1196 in 1.21.11, before the monster check), so the mod uses no other
-     * bed tonight: it tries this one every {@link #NOT_SAFE_RETRY_TICKS} while the player is in
-     * reach, never walks the player back to it, and gives it up after {@link
-     * #NOT_SAFE_GIVE_UP_TICKS}.
+     * bed in that world tonight: it tries this one every {@link #NOT_SAFE_RETRY_TICKS} while the
+     * player is in reach, never walks the player back to it, and gives it up after {@link
+     * #NOT_SAFE_GIVE_UP_TICKS}. A trip to another dimension or a reconnect keeps it; it ends as
+     * {@link #stayUp} does, or once the bed is gone.
      */
-    private @Nullable Question notSafeBed;
+    private @Nullable NotSafe notSafe;
 
-    /** Ticks since the first "monsters nearby" refusal of {@link #notSafeBed}. */
+    /**
+     * Ticks since the first "monsters nearby" refusal of {@link #notSafe}, counted on {@link
+     * Clock#WORLD} while the player is in that world: a monster can leave while a screen is open,
+     * but not while the game is paused.
+     */
     private int notSafeTicks;
 
     /** How many wrapped Baritone commands are running: an alias runs its target inside it. */
@@ -167,7 +179,7 @@ public final class AutoSleeper {
 
     private @Nullable Walk walk;
 
-    /** Ticks since the current walk started. */
+    /** Ticks since the current walk started, counted on {@link Clock#PLAYER}. */
     private int walkTicks;
 
     /** Baritone found no way to the bed of the current walk. */
@@ -210,13 +222,13 @@ public final class AutoSleeper {
         ClientLevel level = minecraft.level;
         boolean sleeping = player != null && player.isSleeping();
         if (wasSleeping && !sleeping && player != null && level != null) {
-            stayUp = new StayUp(world(minecraft), level.dimension(), dayOf(level));
+            stayUp = Night.of(world(minecraft), level);
         }
         wasSleeping = sleeping;
         if (level != lastLevel) {
             lastLevel = level;
             levelTicks = 0;
-        } else {
+        } else if (counts(minecraft, Clock.WORLD)) {
             levelTicks++;
         }
 
@@ -243,10 +255,14 @@ public final class AutoSleeper {
                 server != null
                         ? clientRuleAllows(level, player.blockPosition())
                         : remoteServerAllows(level, player.blockPosition());
-        if (stayUp != null
-                && levelTicks > TIME_SYNC_TICKS
-                && stayUp.isOver(world(minecraft), level, allowedNow)) {
-            stayUp = null;
+        @Nullable Object world = world(minecraft);
+        if (levelTicks > TIME_SYNC_TICKS) {
+            if (stayUp != null && stayUp.isOver(world, level, allowedNow)) {
+                stayUp = null;
+            }
+            if (notSafe != null && notSafe.night().isOver(world, level, allowedNow)) {
+                notSafe = null;
+            }
         }
         if (!allowedNow) {
             stopWalking();
@@ -260,11 +276,11 @@ public final class AutoSleeper {
             maySleepHere = true;
             cooldownTicks = 0;
         }
-        if (stayUp != null && stayUp.blocks(world(minecraft), level)) {
+        if (stayUp != null && stayUp.inDimension(world, level)) {
             return;
         }
 
-        boolean playerCanAct = minecraft.screen == null && !player.isSpectator();
+        boolean playerCanAct = counts(minecraft, Clock.PLAYER);
         if (walk != null) {
             Walk ended = walk;
             if (walkFailed || playerCanAct && ++walkTicks > WALK_DEADLINE_TICKS) {
@@ -280,13 +296,19 @@ public final class AutoSleeper {
                 }
             }
         }
-        forgetGoneNotSafeBed(level);
-        if (notSafeBed != null && !givenUp(notSafeBed) && ++notSafeTicks > NOT_SAFE_GIVE_UP_TICKS) {
-            fail(player, notSafeBed, TRIES_PER_BED, BED_NOT_SAFE_MESSAGE);
+        forgetGoneNotSafeBed(world, level);
+        if (notSafe != null
+                && !notSafe.givenUp()
+                && notSafe.night().inWorld(world)
+                && counts(minecraft, Clock.WORLD)
+                && ++notSafeTicks > NOT_SAFE_GIVE_UP_TICKS) {
+            notSafe = notSafe.givenUpNow();
+            tell(player, BED_NOT_SAFE_MESSAGE, notSafe.head());
         }
         if (!playerCanAct || walk == null && baritoneBusy()) {
-            // A player could not right-click now (the pause menu, an inventory, the death screen,
-            // spectator mode), or the player's own Baritone task has the player: leave both alone.
+            // A player could not right-click now (the game paused, the pause menu, an inventory,
+            // the death screen, spectator mode), or the player's own Baritone task has the player:
+            // leave both alone.
             aim = null;
             return;
         }
@@ -314,7 +336,7 @@ public final class AutoSleeper {
         lastQuestion = null;
         serverAnswer = null;
 
-        BlockPos bed = findNearestBed(level, player);
+        BlockPos bed = findNearestBed(world, level, player);
         if (bed == null) {
             stopWalking();
             return;
@@ -332,7 +354,7 @@ public final class AutoSleeper {
                 lookAt(player, bed);
                 aim = new Aim(question, bed);
             }
-        } else if (notSafeBed != null) {
+        } else if (notSafe != null && notSafe.night().inWorld(world)) {
             // The player has moved away from the bed the server refused for monsters: never walk
             // them back to it.
             stopWalking();
@@ -398,10 +420,13 @@ public final class AutoSleeper {
         int after = Math.min(TRIES_PER_BED, before + tries);
         failedTries.put(bed, after);
         if (before < TRIES_PER_BED && after == TRIES_PER_BED) {
-            BlockPos head = bed.head();
-            player.displayClientMessage(
-                    Component.translatable(message, head.getX(), head.getY(), head.getZ()), false);
+            tell(player, message, bed.head());
         }
+    }
+
+    private static void tell(LocalPlayer player, String message, BlockPos head) {
+        player.displayClientMessage(
+                Component.translatable(message, head.getX(), head.getY(), head.getZ()), false);
     }
 
     private boolean givenUp(Question bed) {
@@ -410,16 +435,21 @@ public final class AutoSleeper {
 
     /**
      * Watches the action bar for the server's answer to the last use. "Monsters nearby" does not
-     * count as a failed try; see {@link #notSafeBed}.
+     * count as a failed try; see {@link #notSafe}.
      */
     public void onGameMessage(Component message, boolean overlay) {
-        Component notSafe = Player.BedSleepingProblem.NOT_SAFE.message();
+        Component notSafeMessage = Player.BedSleepingProblem.NOT_SAFE.message();
         if (overlay
                 && usedBed != null
-                && notSafe != null
-                && message.getContents().equals(notSafe.getContents())) {
-            if (!usedBed.equals(notSafeBed)) {
-                notSafeBed = usedBed;
+                && notSafeMessage != null
+                && message.getContents().equals(notSafeMessage.getContents())) {
+            NotSafe refused =
+                    new NotSafe(
+                            Night.of(world(Minecraft.getInstance()), usedBed.level()),
+                            usedBed.head(),
+                            false);
+            if (notSafe == null || !notSafe.isBed(refused)) {
+                notSafe = refused;
                 notSafeTicks = 0;
             }
             usedBed = null;
@@ -427,11 +457,12 @@ public final class AutoSleeper {
         }
     }
 
-    /** Forgets everything about the night that has ended. */
+    /**
+     * Forgets everything about the night that has ended; {@link #stayUp} and {@link #notSafe} end
+     * on their own, by world and day (see {@link Night}).
+     */
     private void startNewNight() {
         failedTries.clear();
-        notSafeBed = null;
-        notSafeTicks = 0;
         aim = null;
         usedBed = null;
         // An answer from the integrated server holds for the next attempt only, never for the next
@@ -472,11 +503,16 @@ public final class AutoSleeper {
         Minecraft minecraft = Minecraft.getInstance();
         LocalPlayer player = minecraft.player;
         ClientLevel level = minecraft.level;
-        if ((walk != null || notSafeBed != null && !givenUp(notSafeBed))
-                && player != null
-                && level != null) {
+        @Nullable Object world = world(minecraft);
+        boolean waitingOutMonsters =
+                notSafe != null && !notSafe.givenUp() && notSafe.night().inWorld(world);
+        if ((walk != null || waitingOutMonsters) && player != null && level != null) {
             stopWalking();
-            stayUp = new StayUp(world(minecraft), level.dimension(), dayOf(level));
+            stayUp = Night.of(world, level);
+            if (waitingOutMonsters) {
+                // Given up without a word: the player has just been told the mod stopped.
+                notSafe = notSafe.givenUpNow();
+            }
             player.displayClientMessage(Component.translatable(STOPPED_MESSAGE), false);
         }
     }
@@ -571,20 +607,27 @@ public final class AutoSleeper {
                 : bed.relative(state.getValue(BedBlock.FACING));
     }
 
-    /** Forgets the bed refused for monsters once it is gone, or the player is in another level. */
-    private void forgetGoneNotSafeBed(ClientLevel level) {
-        if (notSafeBed != null
-                && !(notSafeBed.level() == level
-                        && level.getBlockState(notSafeBed.head()).getBlock() instanceof BedBlock)) {
-            notSafeBed = null;
+    /**
+     * Forgets the bed refused for monsters once it is gone. A client level fills in its chunks
+     * after a join or a dimension change and reads air where it has none yet
+     * (ClientChunkCache.java:74-83 and Level.java:610-613 in 1.21.11), so a bed in a missing chunk
+     * is not gone.
+     */
+    private void forgetGoneNotSafeBed(@Nullable Object world, ClientLevel level) {
+        if (notSafe != null
+                && notSafe.night().inDimension(world, level)
+                && level.isLoaded(notSafe.head())
+                && !(level.getBlockState(notSafe.head()).getBlock() instanceof BedBlock)) {
+            notSafe = null;
         }
     }
 
     /**
-     * The nearest bed block that has not been given up tonight; only the bed refused for monsters
-     * nearby, while it is still there.
+     * The nearest bed block that has not been given up tonight; in the world of a bed refused for
+     * monsters nearby, only that bed, until it is given up.
      */
-    private @Nullable BlockPos findNearestBed(ClientLevel level, LocalPlayer player) {
+    private @Nullable BlockPos findNearestBed(
+            @Nullable Object world, ClientLevel level, LocalPlayer player) {
         BlockPos origin = player.blockPosition();
         BlockPos nearest = null;
         double nearestDistance = Double.MAX_VALUE;
@@ -603,8 +646,9 @@ public final class AutoSleeper {
                     || !(level.getBlockState(pos).getBlock() instanceof BedBlock)) {
                 continue;
             }
-            Question bed = new Question(level, bedHead(level, pos));
-            if (!givenUp(bed) && (notSafeBed == null || notSafeBed.equals(bed))) {
+            BlockPos head = bedHead(level, pos);
+            if (!givenUp(new Question(level, head))
+                    && (notSafe == null || notSafe.allows(world, level, head))) {
                 nearest = pos.immutable();
                 nearestDistance = distance;
             }
@@ -688,16 +732,77 @@ public final class AutoSleeper {
 
     private record Walk(Question bed, BlockPos target, Goal goal, SavedSettings saved) {}
 
-    /** Where and on which day the player chose to stay up; see {@link #stayUp}. */
-    private record StayUp(@Nullable Object world, ResourceKey<Level> dimension, long day) {
-        boolean blocks(@Nullable Object currentWorld, ClientLevel level) {
-            return Objects.equals(world, currentWorld) && level.dimension().equals(dimension);
+    /**
+     * A night in one dimension of one world, for {@link #stayUp} and {@link #notSafe}. It is over
+     * at a refusal of sleep in that dimension, or once a later day has started anywhere in that
+     * world (day numbers are compared, no ticks counted).
+     */
+    private record Night(@Nullable Object world, ResourceKey<Level> dimension, long day) {
+        static Night of(@Nullable Object world, ClientLevel level) {
+            return new Night(world, level.dimension(), dayOf(level));
+        }
+
+        boolean inWorld(@Nullable Object currentWorld) {
+            return Objects.equals(world, currentWorld);
+        }
+
+        boolean inDimension(@Nullable Object currentWorld, ClientLevel level) {
+            return inWorld(currentWorld) && level.dimension().equals(dimension);
         }
 
         boolean isOver(@Nullable Object currentWorld, ClientLevel level, boolean allowedNow) {
-            return Objects.equals(world, currentWorld)
+            return inWorld(currentWorld)
                     && (dayOf(level) != day || level.dimension().equals(dimension) && !allowedNow);
         }
+    }
+
+    /** The bed refused for monsters, by its head; see {@link #notSafe}. */
+    private record NotSafe(Night night, BlockPos head, boolean givenUp) {
+        boolean isBed(NotSafe other) {
+            return Objects.equals(night.world(), other.night().world())
+                    && night.dimension().equals(other.night().dimension())
+                    && head.equals(other.head());
+        }
+
+        NotSafe givenUpNow() {
+            return new NotSafe(night, head, true);
+        }
+
+        /** Whether the mod may use this bed: in this world, only the refused one, not given up. */
+        boolean allows(@Nullable Object currentWorld, ClientLevel level, BlockPos bedHead) {
+            return !night.inWorld(currentWorld)
+                    || !givenUp && night.inDimension(currentWorld, level) && head.equals(bedHead);
+        }
+    }
+
+    /**
+     * Which ticks a tick counter counts; {@link #counts} decides, and each counter names its clock
+     * where it is declared. No clock counts a tick in which a singleplayer game is paused: the
+     * integrated server then stands still (IntegratedServer.java:111-121 in 1.21.11), and so do the
+     * world, its monsters and the time the server sends.
+     */
+    private enum Clock {
+        /** Every tick in which the world runs; an open screen does not stop it. */
+        WORLD,
+
+        /**
+         * The ticks in which the player could right-click: the world runs, no screen is open and
+         * the player is not in spectator mode.
+         */
+        PLAYER
+    }
+
+    private static boolean counts(Minecraft minecraft, Clock clock) {
+        if (minecraft.isPaused()) {
+            return false;
+        }
+        return switch (clock) {
+            case WORLD -> true;
+            case PLAYER ->
+                    minecraft.screen == null
+                            && minecraft.player != null
+                            && !minecraft.player.isSpectator();
+        };
     }
 
     /**

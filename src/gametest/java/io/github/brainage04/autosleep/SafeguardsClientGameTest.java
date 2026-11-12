@@ -27,8 +27,10 @@ import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.LevelLoadingScreen;
+import net.minecraft.client.gui.screens.Overlay;
 import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
@@ -46,6 +48,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.monster.zombie.Zombie;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Block;
@@ -174,6 +177,8 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
                 run("monster-stays", this::givesUpABedAMonsterNeverLeaves);
                 run("monster-walk-away", this::neverWalksBackToAMonstersBed);
                 run("monster-stop", this::stopsAtAMonstersBedOnStop);
+                run("monster-reconnect", this::keepsToAMonstersBedAcrossAReconnect);
+                run("monster-other-dimension", this::usesNoBedElsewhereAfterAMonstersBed);
                 run("monster-bed-broken", this::forgetsAMonstersBedOnceItIsGone);
                 run("bed-in-a-pit", this::neverUsesAWaterBucket);
                 run("walk-never-arrives", this::givesUpAWalkThatNeverArrives);
@@ -191,11 +196,15 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
             }
         }
 
-        // The pause menu pauses the game only in singleplayer (Minecraft#isPaused).
+        // A singleplayer game pauses (Minecraft#isPaused) under the pause menu or an overlay.
         try (TestSingleplayerContext singleplayer = context.worldBuilder().create()) {
             server = singleplayer.getServer();
             setUpServer();
             run("walk-paused", this::keepsTheWalkThroughThePauseMenu);
+            run("walk-paused-overlay", this::keepsTheWalkThroughAPausingOverlay);
+            run("turn-paused-overlay", this::neverTurnsWhileAnOverlayPausesTheGame);
+            run("monster-wait-paused", this::keepsTheMonsterWaitThroughThePauseMenu);
+            run("stay-up-paused", this::staysUpThroughAPauseBeforeTheTimeArrives);
         }
 
         if (!failures.isEmpty()) {
@@ -244,9 +253,11 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
             context.runOnClient(
                     client -> {
                         client.options.keyShift.setDown(false);
+                        client.setOverlay(null);
                         sneakOnTurnFrom = null;
                         watchedForWater = null;
                         TimePacketHold.reset();
+                        ChunkPacketHold.reset();
                         baritone().getPathingBehavior().cancelEverything();
                     });
             server.runOnServer(
@@ -762,12 +773,16 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
         MonsterStage stage = buildMonsterStage();
         step(
                 "monster-stays",
-                "Midnight, a bed in reach with a monster beside it that never leaves",
+                "Midnight, a bed in reach with a monster beside it that never leaves; the player"
+                        + " has the inventory open after the first refusal",
                 "Gives the bed up after "
                         + AutoSleeper.NOT_SAFE_GIVE_UP_TICKS / 20
-                        + " s, says so once, uses no other bed");
+                        + " s, open inventory included, says so once, uses no other bed");
         waitForTheFirstRefusal(stage);
+        // On a server the world runs behind a screen, so the monster could have left.
+        context.setScreen(() -> new InventoryScreen(Minecraft.getInstance().player));
         context.waitTicks(AutoSleeper.NOT_SAFE_GIVE_UP_TICKS + 20);
+        context.setScreen(() -> null);
         assertToldOnce(AutoSleeper.BED_NOT_SAFE_MESSAGE, stage.near());
         serverBedUses.clear();
         clientBedUses.set(0);
@@ -807,15 +822,60 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
         step(
                 "monster-stop",
                 "Midnight, a bed in reach with a monster beside it; after the first refusal the"
-                        + " player types #stop",
+                        + " player types #stop, then #help",
                 "Stops for the night, says so once");
         waitForTheFirstRefusal(stage);
         playerCommand("#stop");
+        playerCommand("#help");
         serverBedUses.clear();
         clientBedUses.set(0);
         context.waitTicks(AutoSleeper.NOT_SAFE_RETRY_TICKS * 2);
         assertNoBedUse("after #stop");
         assertToldOnce(AutoSleeper.STOPPED_MESSAGE);
+    }
+
+    private void keepsToAMonstersBedAcrossAReconnect() {
+        MonsterStage stage = buildMonsterStage();
+        step(
+                "monster-reconnect",
+                "Midnight, a bed in reach with a monster beside it; after the first refusal the"
+                        + " player moves 5 blocks from the other bed, reconnects (the first bed's"
+                        + " chunk arriving 3 s after the rest), then goes to the Nether and back",
+                "Uses no other bed that night, and the other bed the next night");
+        waitForTheFirstRefusal(stage);
+        BlockPos nearTheOther = CENTRE.offset(0, 0, -6);
+        standAt(nearTheOther, 180.0F);
+        // Until that chunk arrives, the client reads air where the first bed is.
+        context.runOnClient(
+                client ->
+                        ChunkPacketHold.armForNextLevel(
+                                client.level, new ChunkPos(stage.near()), 60));
+        serverBedUses.clear();
+        clientBedUses.set(0);
+        reconnect();
+        assertStaysUp("after a reconnect");
+        visitTheNether();
+        standAt(nearTheOther, 180.0F);
+        assertStaysUp("after a trip to the Nether and back");
+        ClientGameTestRecordingHud.log("No other bed after a reconnect and the Nether");
+        day();
+        night();
+        fallAsleepIn(stage.far(), SLEEP_TIMEOUT_TICKS);
+    }
+
+    private void usesNoBedElsewhereAfterAMonstersBed() {
+        MonsterStage stage = buildMonsterStage();
+        step(
+                "monster-other-dimension",
+                "Midnight, a bed in reach with a monster beside it; after the first refusal the"
+                        + " player goes to another dimension of the Overworld's type, with a bed in"
+                        + " reach",
+                "Uses no bed there: the first bed has the respawn point");
+        waitForTheFirstRefusal(stage);
+        serverBedUses.clear();
+        clientBedUses.set(0);
+        standInABox(SECOND_OVERWORLD, true);
+        assertStaysUp("in the other dimension");
     }
 
     private void forgetsAMonstersBedOnceItIsGone() {
@@ -1100,25 +1160,156 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
     }
 
     private void keepsTheWalkThroughThePauseMenu() {
+        walksOnAfterAPause("walk-paused", "the pause menu is open", false);
+    }
+
+    private void keepsTheWalkThroughAPausingOverlay() {
+        walksOnAfterAPause(
+                "walk-paused-overlay",
+                "the game is paused under an overlay with no screen, as while resource packs"
+                        + " reload,",
+                true);
+    }
+
+    private void walksOnAfterAPause(String id, String pause, boolean overlay) {
         day();
         buildStage();
         BlockPos bed = CENTRE.offset(0, 0, 10);
         placeBed(bed);
         standAt(CENTRE, 180.0F);
         step(
-                "walk-paused",
-                "Singleplayer, midnight, a bed out of reach; the pause menu is open for "
+                id,
+                "Singleplayer, midnight, a bed out of reach; "
+                        + pause
+                        + " for "
                         + (AutoSleeper.WALK_DEADLINE_TICKS + 20) / 20
                         + " s during the walk",
-                "Goes on with the walk once the menu is closed, and sleeps in that bed");
+                "Goes on with the walk once the game runs again, and sleeps in that bed");
         modMessages.clear();
         night();
         waitForTheWalk();
-        context.setScreen(() -> new PauseScreen(true));
-        context.waitFor(Minecraft::isPaused, 20);
+        pause(overlay);
         context.waitTicks(AutoSleeper.WALK_DEADLINE_TICKS + 20);
-        context.setScreen(() -> null);
+        unpause();
         fallAsleepIn(bed, SLEEP_TIMEOUT_TICKS);
+        assertNoMessage();
+    }
+
+    private void neverTurnsWhileAnOverlayPausesTheGame() {
+        day();
+        buildStage();
+        BlockPos bed = CENTRE.offset(0, 0, 3);
+        placeBed(bed);
+        // A pillar top 8 blocks above the floor: the bed is beyond the search's 6 blocks down.
+        BlockPos pillar = CENTRE.offset(0, 7, 0);
+        server.runOnServer(
+                minecraftServer ->
+                        minecraftServer
+                                .overworld()
+                                .setBlockAndUpdate(pillar, Blocks.STONE.defaultBlockState()));
+        standAt(pillar.above(), 180.0F);
+        step(
+                "turn-paused-overlay",
+                "Singleplayer, midnight, a bed out of the search range; the game is paused under an"
+                        + " overlay with no screen, and the player is moved into reach of the bed",
+                "No turn and no use while the game is paused, then sleeps");
+        night();
+        pause(true);
+        standAt(CENTRE, 180.0F);
+        server.runOnServer(
+                minecraftServer ->
+                        minecraftServer
+                                .overworld()
+                                .setBlockAndUpdate(pillar, Blocks.AIR.defaultBlockState()));
+        float[] view = view();
+        serverBedUses.clear();
+        clientBedUses.set(0);
+        context.waitTicks(WATCH_TICKS);
+        assertNoBedUse("while the game is paused");
+        assertViewStill(view, "while the game is paused");
+        unpause();
+        fallAsleepIn(bed, AutoSleeper.RETRY_INTERVAL_TICKS * 3);
+    }
+
+    private void keepsTheMonsterWaitThroughThePauseMenu() {
+        MonsterStage stage = buildMonsterStage();
+        step(
+                "monster-wait-paused",
+                "Singleplayer, midnight, a bed in reach with a monster beside it; after the first"
+                        + " refusal the pause menu is open for "
+                        + (AutoSleeper.NOT_SAFE_GIVE_UP_TICKS + 20) / 20
+                        + " s, then the monster is gone",
+                "No message, and sleeps in that bed");
+        waitForTheFirstRefusal(stage);
+        pause(false);
+        context.waitTicks(AutoSleeper.NOT_SAFE_GIVE_UP_TICKS + 20);
+        unpause();
+        command("kill @e[type=minecraft:zombie]");
+        fallAsleepIn(stage.near(), SLEEP_TIMEOUT_TICKS);
+        assertNoMessage();
+    }
+
+    private void staysUpThroughAPauseBeforeTheTimeArrives() {
+        day();
+        buildStage();
+        BlockPos bed = CENTRE.offset(0, 0, 3);
+        placeBed(bed);
+        standAt(CENTRE, 180.0F);
+        step(
+                "stay-up-paused",
+                "Singleplayer, midnight; the player leaves the bed, goes to the Nether and back,"
+                        + " and the pause menu opens as the Overworld loads, before its time arrives",
+                "Stays up: the paused seconds are no wait for the server's time");
+        night();
+        leaveTheBed(bed);
+        visitTheNether();
+        // The Overworld's time arrives after half the wait the mod gives it, counting only ticks
+        // in which the game runs.
+        context.runOnClient(
+                client ->
+                        TimePacketHold.armForNextLevel(
+                                client.level, AutoSleeper.TIME_SYNC_TICKS / 2));
+        serverBedUses.clear();
+        clientBedUses.set(0);
+        Vec3 feet = Vec3.atBottomCenterOf(CENTRE);
+        command("tp @a " + feet.x + " " + feet.y + " " + feet.z + " 180 10");
+        context.waitFor(
+                client -> client.level.dimension() == Level.OVERWORLD, STAGE_LOAD_TIMEOUT_TICKS);
+        pause(false);
+        context.waitTicks(AutoSleeper.TIME_SYNC_TICKS * 2);
+        unpause();
+        assertStaysUp("after the pause");
+    }
+
+    /**
+     * Pauses a singleplayer game with the pause menu, or with an overlay and no screen, as a
+     * resource reload does ({@code Overlay#isPauseScreen} is true unless overridden).
+     */
+    private void pause(boolean overlay) {
+        if (overlay) {
+            context.runOnClient(
+                    client ->
+                            client.setOverlay(
+                                    new Overlay() {
+                                        @Override
+                                        public void render(
+                                                GuiGraphics graphics,
+                                                int mouseX,
+                                                int mouseY,
+                                                float partialTick) {}
+                                    }));
+        } else {
+            context.setScreen(() -> new PauseScreen(true));
+        }
+        context.waitFor(Minecraft::isPaused, 20);
+    }
+
+    private void unpause() {
+        context.runOnClient(client -> client.setOverlay(null));
+        context.setScreen(() -> null);
+    }
+
+    private void assertNoMessage() {
         if (!modMessages.isEmpty()) {
             throw new AssertionError(
                     "Expected no message, but the mod said "
@@ -1132,6 +1323,7 @@ public class SafeguardsClientGameTest implements FabricClientGameTest {
      */
     private void watch(Minecraft client) {
         TimePacketHold.tick(client);
+        ChunkPacketHold.tick(client);
         if (client.level == null || client.player == null) {
             return;
         }

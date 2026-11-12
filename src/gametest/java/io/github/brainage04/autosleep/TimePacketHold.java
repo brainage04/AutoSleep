@@ -22,7 +22,10 @@ public final class TimePacketHold {
 
     private TimePacketHold() {}
 
-    /** Holds the time packets of the next level after {@code current} for {@code ticks} ticks. */
+    /**
+     * Holds the time packets of the next level after {@code current} for {@code ticks} ticks in
+     * which the game is not paused: a paused integrated server sends nothing.
+     */
     static void armForNextLevel(ClientLevel current, int ticks) {
         armedIn = current;
         holdTicks = ticks;
@@ -54,7 +57,7 @@ public final class TimePacketHold {
 
     /** Hands the last held packet to the game once the hold is over. */
     static void tick(Minecraft minecraft) {
-        if (heldFor == null || --ticksLeft > 0) {
+        if (heldFor == null || minecraft.isPaused() || --ticksLeft > 0) {
             return;
         }
         ClientboundSetTimePacket packet = held;
