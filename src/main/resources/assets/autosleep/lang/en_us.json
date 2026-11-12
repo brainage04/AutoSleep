@@ -1,0 +1,5 @@
+{
+	"autosleep.message.bed_unusable": "AutoSleep could not use the bed at %s, %s, %s and leaves it alone until the next night.",
+	"autosleep.message.bed_unreachable": "AutoSleep found no way to the bed at %s, %s, %s and leaves it alone until the next night.",
+	"autosleep.message.disabled": "AutoSleep is off: another Baritone jar in your mods folder, such as baritone-standalone-fabric, replaced the Baritone API that AutoSleep bundles. Remove that jar to use AutoSleep."
+}

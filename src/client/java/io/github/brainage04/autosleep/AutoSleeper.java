@@ -2,12 +2,20 @@ package io.github.brainage04.autosleep;
 
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
+import baritone.api.Settings;
+import baritone.api.event.events.PathEvent;
+import baritone.api.event.listener.AbstractGameEventListener;
+import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalGetToBlock;
+import baritone.api.process.IBaritoneProcess;
+import java.util.HashMap;
+import java.util.Map;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
@@ -33,22 +41,25 @@ import org.jetbrains.annotations.Nullable;
 public final class AutoSleeper {
     static final int RETRY_INTERVAL_TICKS = 20;
 
-    /**
-     * Ticks to wait after waking up. The server skips the night and wakes everyone in the same
-     * tick, but it sends the new day time only once a second, so until then the client still sees
-     * night and would get back into bed.
-     */
-    static final int WAKE_UP_GRACE_TICKS = 40;
-
-    /** Ticks before a look that missed the bed is tried again: the bed itself has not moved. */
+    /** Ticks before a look that missed the bed is tried again. */
     static final int MISSED_LOOK_RETRY_TICKS = 2;
+
+    /**
+     * Failed tries on one bed in one night (a look that misses it, or a use that does not put the
+     * player to sleep) before the mod leaves that bed alone until the next night.
+     */
+    static final int TRIES_PER_BED = 3;
+
+    static final String BED_UNUSABLE_MESSAGE = "autosleep.message.bed_unusable";
+    static final String BED_UNREACHABLE_MESSAGE = "autosleep.message.bed_unreachable";
 
     private static final int SEARCH_RADIUS_HORIZONTAL = 24;
     private static final int SEARCH_RADIUS_VERTICAL = 6;
 
     /**
      * How far the player's feet may be from a bed block: vanilla's {@code
-     * ServerPlayer#isReachableBedBlock}.
+     * ServerPlayer#isReachableBedBlock} (ServerPlayer.java:1242-1245 in 1.21.11), restated because
+     * that method is private and runs only on the server.
      */
     private static final double BED_RANGE_HORIZONTAL = 3.0D;
 
@@ -60,10 +71,30 @@ public final class AutoSleeper {
     /** Whether the last tick's answer to "would the game let me sleep here" was yes. */
     private boolean maySleepHere;
 
-    private @Nullable BlockPos walkingTo;
+    /**
+     * The player got out of bed or was woken while the game still lets them sleep: no bed until the
+     * game next refuses sleep, at daybreak. Waking up in the morning sets it too, which keeps the
+     * player up until the client sees the new day: the server sends the day time only once a
+     * second.
+     */
+    private boolean stayingUp;
 
-    /** Whether the walk this mod started has already been noticed as finished. */
-    private boolean walkEnded;
+    /** Tonight's failed tries per bed; a bed at {@link #TRIES_PER_BED} is left alone. */
+    private final Map<Question, Integer> failedTries = new HashMap<>();
+
+    /**
+     * The bed the view was put on last tick. It is used on this tick, after the player's tick has
+     * sent the new view to the server.
+     */
+    private @Nullable Aim aim;
+
+    /** The bed used at the last attempt: a player still awake at the next attempt was refused. */
+    private @Nullable Question usedBed;
+
+    private @Nullable Walk walk;
+
+    /** Baritone found no way to the bed of the current walk. */
+    private boolean walkFailed;
 
     /**
      * The integrated server's latest answer, written on the server thread; see {@link
@@ -73,19 +104,39 @@ public final class AutoSleeper {
 
     private @Nullable Question lastQuestion;
 
+    AutoSleeper() {
+        // Otherwise Baritone runs any chat message that starts with one of its command names ("help
+        // me", "stop", "come here") instead of sending it; its own comment asks for it to be off
+        // when Baritone is used inside another mod (Settings.java:681-685 in Baritone 1.17.0).
+        // Messages starting with its prefix (#) still go to Baritone.
+        BaritoneAPI.getSettings().chatControl.value = false;
+        baritone()
+                .getGameEventHandler()
+                .registerEventListener(
+                        new AbstractGameEventListener() {
+                            @Override
+                            public void onPathEvent(PathEvent event) {
+                                if (event == PathEvent.CALC_FAILED
+                                        && walk != null
+                                        && ownsWalk(walk)) {
+                                    walkFailed = true;
+                                }
+                            }
+                        });
+    }
+
     public void tick(Minecraft minecraft) {
         LocalPlayer player = minecraft.player;
         ClientLevel level = minecraft.level;
         boolean sleeping = player != null && player.isSleeping();
         if (wasSleeping && !sleeping) {
-            cooldownTicks = WAKE_UP_GRACE_TICKS;
+            stayingUp = true;
         }
         wasSleeping = sleeping;
 
         if (player == null || level == null || minecraft.gameMode == null) {
-            walkingTo = null;
-            lastQuestion = null;
-            serverAnswer = null;
+            endWalk();
+            startNewNight();
             maySleepHere = false;
             return;
         }
@@ -93,9 +144,8 @@ public final class AutoSleeper {
             stopWalking();
             // Nothing asked before the night was skipped may be used in the morning.
             lastQuestion = null;
-            // The player is in bed, so the game let them sleep: waking up in a stale night must not
-            // look like nightfall and must not cut the wake-up grace short.
-            maySleepHere = true;
+            aim = null;
+            usedBed = null;
             return;
         }
 
@@ -107,28 +157,45 @@ public final class AutoSleeper {
                 server != null
                         ? clientRuleAllows(level, player.blockPosition())
                         : remoteServerAllows(level, player.blockPosition());
-        if (allowedNow && !maySleepHere) {
-            // Night has just fallen, or a datapack's rule has just changed: act on this tick, not a
-            // second later.
-            cooldownTicks = 0;
-        }
-        maySleepHere = allowedNow;
-        if (allowedNow) {
-            boolean walkActive = baritone().getCustomGoalProcess().isActive();
-            if (walkingTo != null && !walkActive && !walkEnded) {
-                walkEnded = true;
-                // The walk has just stopped: if it stopped beside the bed, use it on this tick
-                // rather than standing next to it until the next retry.
-                if (inReach(player, walkingTo)) {
-                    cooldownTicks = 0;
-                }
-            }
-        }
         if (!allowedNow) {
             stopWalking();
-            if (cooldownTicks > 0) {
-                cooldownTicks--;
+            startNewNight();
+            maySleepHere = false;
+            return;
+        }
+        if (!maySleepHere) {
+            // Night has just fallen, or a datapack's rule has just changed: act on this tick, not a
+            // second later.
+            maySleepHere = true;
+            cooldownTicks = 0;
+        }
+        if (stayingUp) {
+            return;
+        }
+
+        if (walk != null && (walkFailed || !ownsWalk(walk))) {
+            Walk ended = walk;
+            boolean failed = walkFailed;
+            stopWalking();
+            if (failed) {
+                fail(player, ended.bed(), TRIES_PER_BED, BED_UNREACHABLE_MESSAGE);
+                cooldownTicks = 0;
+            } else if (inReach(player, ended.target())) {
+                // The walk has just stopped beside the bed: use it on this tick rather than
+                // standing next to it until the next retry.
+                cooldownTicks = 0;
             }
+        }
+        if (minecraft.screen != null || player.isSpectator() || walk == null && baritoneBusy()) {
+            // A player could not right-click now (the pause menu, an inventory, the death screen,
+            // spectator mode), or the player's own Baritone task has the player: leave both alone.
+            aim = null;
+            return;
+        }
+        if (aim != null) {
+            Aim aimed = aim;
+            aim = null;
+            use(minecraft, player, level, aimed);
             return;
         }
         if (cooldownTicks > 0) {
@@ -136,6 +203,10 @@ public final class AutoSleeper {
             return;
         }
         cooldownTicks = RETRY_INTERVAL_TICKS;
+        if (usedBed != null) {
+            fail(player, usedBed, 1, BED_UNUSABLE_MESSAGE);
+            usedBed = null;
+        }
 
         // Every attempt takes the answer to the previous attempt's question, if any, and asks
         // afresh only when it finds a bed in singleplayer: an attempt that asks nothing leaves
@@ -146,39 +217,33 @@ public final class AutoSleeper {
         serverAnswer = null;
 
         BlockPos bed = findNearestBed(level, player);
-        if (bed == null
-                || server != null
-                        && !integratedServerAllows(
-                                server,
-                                new Question(level, bedHead(level, bed)),
-                                previousQuestion,
-                                previousAnswer)) {
+        if (bed == null) {
+            stopWalking();
+            return;
+        }
+        Question question = new Question(level, bedHead(level, bed));
+        if (server != null
+                && !integratedServerAllows(server, question, previousQuestion, previousAnswer)) {
             stopWalking();
             return;
         }
 
         if (inReach(player, bed)) {
             stopWalking();
-            if (lookAndUse(minecraft, player, level, bed) == Aim.MISSED) {
-                cooldownTicks = MISSED_LOOK_RETRY_TICKS;
+            if (!usesHeldItem(player)) {
+                lookAt(player, bed);
+                aim = new Aim(question, bed);
             }
-        } else if (!bed.equals(walkingTo) || !baritone().getCustomGoalProcess().isActive()) {
-            walkingTo = bed;
-            walkEnded = false;
-            baritone().getCustomGoalProcess().setGoalAndPath(new GoalGetToBlock(bed));
+        } else if (walk == null || !walk.bed().equals(question)) {
+            walkTo(question, bed);
         }
     }
 
     /**
-     * Puts the view on the bed and uses it on the same tick, so no time is spent between walking
-     * there and lying down. The hit result is the game's own pick, so the bed is only used when the
-     * crosshair is on it, from vanilla reach.
+     * Puts the view on the bed in one frame, as a player turns with the mouse before
+     * right-clicking; {@link #use} clicks on the next tick.
      */
-    private Aim lookAndUse(
-            Minecraft minecraft, LocalPlayer player, ClientLevel level, BlockPos bed) {
-        if (!(level.getBlockState(bed).getBlock() instanceof BedBlock) || !inReach(player, bed)) {
-            return Aim.GONE;
-        }
+    private static void lookAt(LocalPlayer player, BlockPos bed) {
         Vec3 eye = player.getEyePosition();
         Vec3 target = Vec3.atCenterOf(bed);
         float yaw = BedLook.normalizeYaw(BedLook.yawTo(eye, target));
@@ -189,14 +254,68 @@ public final class AutoSleeper {
         player.setXRot(pitch);
         player.yRotO = yaw;
         player.xRotO = pitch;
+    }
 
+    /**
+     * Right-clicks the bed the view was put on last tick. The player's tick has already sent that
+     * view to the server (LocalPlayer.java:241 runs inside Minecraft.java:1820, before {@code
+     * END_CLIENT_TICK}), so the server gets the turn before the use. The hit result is the game's
+     * own pick, so the bed is used only when the crosshair is on it, from vanilla reach.
+     */
+    private void use(Minecraft minecraft, LocalPlayer player, ClientLevel level, Aim aimed) {
+        if (!(level.getBlockState(aimed.target()).getBlock() instanceof BedBlock)
+                || !inReach(player, aimed.target())
+                || usesHeldItem(player)) {
+            return;
+        }
         HitResult hit = player.raycastHitResult(1.0F, player);
         if (!(hit instanceof BlockHitResult blockHit)
-                || !sameBed(level, blockHit.getBlockPos(), bed)) {
-            return Aim.MISSED;
+                || blockHit.getType() != HitResult.Type.BLOCK
+                || !sameBed(level, blockHit.getBlockPos(), aimed.target())) {
+            fail(player, aimed.bed(), 1, BED_UNUSABLE_MESSAGE);
+            cooldownTicks = MISSED_LOOK_RETRY_TICKS;
+            return;
         }
         minecraft.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, blockHit);
-        return Aim.USED;
+        usedBed = aimed.bed();
+    }
+
+    /**
+     * A right click while sneaking with anything in either hand uses the held item on the bed
+     * (placing a block, lighting a fire) and never the bed itself (MultiPlayerGameMode.java:344-346
+     * in 1.21.11, which only that private method decides).
+     */
+    private static boolean usesHeldItem(LocalPlayer player) {
+        return player.isSecondaryUseActive()
+                && (!player.getMainHandItem().isEmpty() || !player.getOffhandItem().isEmpty());
+    }
+
+    /** Counts failed tries on a bed, and tells the player once when the bed is given up. */
+    private void fail(LocalPlayer player, Question bed, int tries, String message) {
+        int before = failedTries.getOrDefault(bed, 0);
+        int after = Math.min(TRIES_PER_BED, before + tries);
+        failedTries.put(bed, after);
+        if (before < TRIES_PER_BED && after == TRIES_PER_BED) {
+            BlockPos head = bed.head();
+            player.displayClientMessage(
+                    Component.translatable(message, head.getX(), head.getY(), head.getZ()), false);
+        }
+    }
+
+    private boolean givenUp(Question bed) {
+        return failedTries.getOrDefault(bed, 0) >= TRIES_PER_BED;
+    }
+
+    /** Forgets everything about the night that has ended. */
+    private void startNewNight() {
+        stayingUp = false;
+        failedTries.clear();
+        aim = null;
+        usedBed = null;
+        // An answer from the integrated server holds for the next attempt only, never for the next
+        // night.
+        lastQuestion = null;
+        serverAnswer = null;
     }
 
     /**
@@ -279,7 +398,8 @@ public final class AutoSleeper {
                 : bed.relative(state.getValue(BedBlock.FACING));
     }
 
-    static @Nullable BlockPos findNearestBed(ClientLevel level, LocalPlayer player) {
+    /** The nearest bed block that has not been given up tonight. */
+    private @Nullable BlockPos findNearestBed(ClientLevel level, LocalPlayer player) {
         BlockPos origin = player.blockPosition();
         BlockPos nearest = null;
         double nearestDistance = Double.MAX_VALUE;
@@ -295,7 +415,8 @@ public final class AutoSleeper {
                                 SEARCH_RADIUS_HORIZONTAL))) {
             double distance = player.position().distanceToSqr(Vec3.atBottomCenterOf(pos));
             if (distance < nearestDistance
-                    && level.getBlockState(pos).getBlock() instanceof BedBlock) {
+                    && level.getBlockState(pos).getBlock() instanceof BedBlock
+                    && !givenUp(new Question(level, bedHead(level, pos)))) {
                 nearest = pos.immutable();
                 nearestDistance = distance;
             }
@@ -314,12 +435,54 @@ public final class AutoSleeper {
                 && player.isWithinBlockInteractionRange(bed, 0.0D);
     }
 
-    /** Cancels only a walk this class started, never one the player gave Baritone. */
+    /**
+     * Walks to the bed with the settings that keep the walk to walking: no digging through or
+     * building on someone's base, and no water bucket for a long fall, which Baritone allows apart
+     * from {@code allowPlace} (CalculationContext.java:103-104 in Baritone 1.17.0). The player's
+     * own values come back when the walk ends.
+     */
+    private void walkTo(Question bed, BlockPos target) {
+        Settings settings = BaritoneAPI.getSettings();
+        SavedSettings saved = walk != null ? walk.saved() : SavedSettings.of(settings);
+        settings.allowBreak.value = false;
+        settings.allowPlace.value = false;
+        settings.allowWaterBucketFall.value = false;
+        Goal goal = new GoalGetToBlock(target);
+        walk = new Walk(bed, target, goal, saved);
+        walkFailed = false;
+        baritone().getCustomGoalProcess().setGoalAndPath(goal);
+    }
+
+    /**
+     * Cancels this mod's walk if Baritone is still on it; never a task the player gave Baritone.
+     */
     private void stopWalking() {
-        if (walkingTo != null) {
-            walkingTo = null;
+        if (walk != null && ownsWalk(walk)) {
             baritone().getPathingBehavior().cancelEverything();
         }
+        endWalk();
+    }
+
+    private void endWalk() {
+        if (walk != null) {
+            walk.saved().restore(BaritoneAPI.getSettings());
+            walk = null;
+        }
+        walkFailed = false;
+    }
+
+    /** Whether Baritone is still on this walk, rather than done, stopped or given another goal. */
+    private static boolean ownsWalk(Walk walk) {
+        return baritone().getCustomGoalProcess().getGoal() == walk.goal();
+    }
+
+    /** A Baritone task of the player's (a {@code #goto}, {@code #goal} or {@code #mine}) is on. */
+    private static boolean baritoneBusy() {
+        return baritone()
+                .getPathingControlManager()
+                .mostRecentInControl()
+                .filter(IBaritoneProcess::isActive)
+                .isPresent();
     }
 
     private static IBaritone baritone() {
@@ -331,13 +494,25 @@ public final class AutoSleeper {
 
     private record ServerAnswer(Question question, boolean maySleep) {}
 
-    /** What one tick of looking at a bed did. */
-    private enum Aim {
-        /** The bed was used with the crosshair on it. */
-        USED,
-        /** The crosshair did not land on the bed: nothing was used. */
-        MISSED,
-        /** The bed is gone or out of reach: this attempt is over. */
-        GONE
+    /** A bed the view was put on, and the half the crosshair was aimed at. */
+    private record Aim(Question bed, BlockPos target) {}
+
+    private record Walk(Question bed, BlockPos target, Goal goal, SavedSettings saved) {}
+
+    /** The player's own values of the Baritone settings a walk changes. */
+    private record SavedSettings(
+            boolean allowBreak, boolean allowPlace, boolean allowWaterBucketFall) {
+        static SavedSettings of(Settings settings) {
+            return new SavedSettings(
+                    settings.allowBreak.value,
+                    settings.allowPlace.value,
+                    settings.allowWaterBucketFall.value);
+        }
+
+        void restore(Settings settings) {
+            settings.allowBreak.value = allowBreak;
+            settings.allowPlace.value = allowPlace;
+            settings.allowWaterBucketFall.value = allowWaterBucketFall;
+        }
     }
 }

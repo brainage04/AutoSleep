@@ -47,6 +47,7 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
             new Vec3(PLAYER.getX() + 0.5D, Y, BED_HEAD.getZ() - 1.5D);
     private static final int GROUND_Y = 4;
     private static final int OUT_OF_RANGE_TICKS = AutoSleeper.RETRY_INTERVAL_TICKS * 4;
+    private static final long MORNING = 1000L;
     private static final long MIDNIGHT = 18000L;
     private static final int WATCH_TICKS = AutoSleeper.RETRY_INTERVAL_TICKS * 8;
     private static final int WALK_AND_SLEEP_TIMEOUT_TICKS = 400;
@@ -80,6 +81,7 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
             checkAnswerIsNotReusedForAnotherBed(server);
             checkAnswerIsNotReusedInAnotherDimension(server);
             checkAnswerIsNotReusedLater(server);
+            checkAnswerIsNotReusedTheNextNight(server);
             check(mode, server, Level.OVERWORLD, Expect.SLEEPS_THROUGH_THE_NIGHT);
         }
 
@@ -143,6 +145,7 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
                             "Walks to the bed and sleeps, stays up after the night is skipped");
         }
 
+        daybreak(server);
         server.runOnServer(
                 minecraftServer -> {
                     buildStage(level(minecraftServer, dimension));
@@ -261,6 +264,7 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
                 id,
                 "Walking to a bed in autosleep_test:allowed_beds, then put beside a bed in a biome whose beds explode",
                 "Never uses the second bed: the answer about the first bed is not reused");
+        daybreak(server);
         server.runOnServer(
                 minecraftServer -> {
                     ServerLevel level = level(minecraftServer, ALLOWED_BEDS);
@@ -310,6 +314,7 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
                 id,
                 "Walking to a bed in autosleep_test:allowed_beds, then put beside the bed at the same position in autosleep_test:exploding_beds",
                 "Never uses it: the answer was about the other dimension's bed");
+        daybreak(server);
         server.runOnServer(
                 minecraftServer -> {
                     buildStage(level(minecraftServer, ALLOWED_BEDS));
@@ -338,6 +343,7 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
                 id,
                 "Walking to a bed in autosleep_test:allowed_beds, then out of range while its biome changes to one whose beds explode",
                 "Back beside it: never uses it, the old answer is not reused");
+        daybreak(server);
         server.runOnServer(minecraftServer -> buildStage(level(minecraftServer, ALLOWED_BEDS)));
         server.runCommand("time set " + MIDNIGHT);
         if (!startWalkingInAllowedBeds(server, id)) {
@@ -364,6 +370,59 @@ public class BedRuleClientGameTest implements FabricClientGameTest {
         teleport(server, ALLOWED_BEDS, PLAYER.getX() + 0.5D, Y, BESIDE_BED.z, 0.0F);
         context.waitFor(client -> client.player.position().distanceTo(BESIDE_BED) < 1.0D, 100);
         expectBedLeftAlone(id, server, ALLOWED_BEDS, BED_HEAD);
+    }
+
+    private void checkAnswerIsNotReusedTheNextNight(TestServerContext server) {
+        String id = "singleplayer-next_night-bed";
+        step(
+                id,
+                "Walking to a bed in autosleep_test:allowed_beds at night; by day its biome changes to one whose beds explode",
+                "Beside it the next night: never uses it, last night's answer is not reused");
+        daybreak(server);
+        server.runOnServer(minecraftServer -> buildStage(level(minecraftServer, ALLOWED_BEDS)));
+        // The stale-answer step left this bed in the exploding biome: the dimension's own biome
+        // first, so tonight's walk starts.
+        server.runCommand(
+                "execute in "
+                        + ALLOWED_BEDS.identifier()
+                        + " run fillbiome "
+                        + coordinates(BED_HEAD.offset(-4, -4, -4))
+                        + " "
+                        + coordinates(BED_HEAD.offset(4, 4, 4))
+                        + " minecraft:plains");
+        server.runCommand("time set " + MIDNIGHT);
+        if (!startWalkingInAllowedBeds(server, id)) {
+            return;
+        }
+        ClientGameTestRecordingHud.log("Walking to the bed; the day comes");
+        daybreak(server);
+        server.runCommand(
+                "execute in "
+                        + ALLOWED_BEDS.identifier()
+                        + " run fillbiome "
+                        + coordinates(BED_HEAD.offset(-4, -4, -4))
+                        + " "
+                        + coordinates(BED_HEAD.offset(4, 4, 4))
+                        + " autosleep_test:exploding_beds");
+        logRules(Mode.SINGLEPLAYER, server, ALLOWED_BEDS, BED_HEAD);
+        teleport(server, ALLOWED_BEDS, PLAYER.getX() + 0.5D, Y, BESIDE_BED.z, 0.0F);
+        context.waitFor(client -> client.player.position().distanceTo(BESIDE_BED) < 1.0D, 100);
+        ClientGameTestRecordingHud.log(
+                "The bed's biome now makes beds explode; the next night falls beside it");
+        serverBedUses.set(0);
+        server.runCommand("time set " + MIDNIGHT);
+        expectBedLeftAlone(id, server, ALLOWED_BEDS, BED_HEAD);
+    }
+
+    /**
+     * Morning, until the client sees it: a player woken in the night stays up until the game next
+     * refuses sleep, so each step starts its night from a day.
+     */
+    private void daybreak(TestServerContext server) {
+        server.runCommand("time set " + MORNING);
+        context.waitFor(
+                client -> !client.level.isDarkOutside() && !client.player.isSleeping(), 100);
+        context.waitTicks(2);
     }
 
     private boolean startWalkingInAllowedBeds(TestServerContext server, String id) {

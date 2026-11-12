@@ -23,6 +23,8 @@ import net.minecraft.world.Difficulty;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Block;
@@ -124,6 +126,10 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
                         }
                     } else if (!level.isClientSide()) {
                         serverBedUses.incrementAndGet();
+                        String problem = unseenByTheServer(player, hitResult);
+                        if (problem != null) {
+                            unplayableBedUse.compareAndSet(null, problem);
+                        }
                     }
                     return InteractionResult.PASS;
                 });
@@ -394,7 +400,8 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
                     + " instead of vanilla's 3.0";
         }
         HitResult crosshair = player.raycastHitResult(1.0F, player);
-        if (!(crosshair instanceof BlockHitResult looked)) {
+        if (!(crosshair instanceof BlockHitResult looked)
+                || looked.getType() != HitResult.Type.BLOCK) {
             return "the crosshair was on nothing, not on the bed at " + used.getBlockPos();
         }
         if (!sameBed(player.level(), looked.getBlockPos(), used.getBlockPos())) {
@@ -410,6 +417,46 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
                     + player.getEyePosition();
         }
         return null;
+    }
+
+    /**
+     * The look the server has for the player when the use arrives, from the rotation of the last
+     * move packet: an anti-cheat compares the use with it, so it must already be on the bed, as
+     * after a player's own turn and click. {@code Entity#pick} would use the head rotation instead
+     * (LivingEntity.java:3197), which in a test run still held the view from before the turn.
+     *
+     * @return what the server saw instead, or null when the server's view was on the bed
+     */
+    private static @Nullable String unseenByTheServer(Player player, BlockHitResult used) {
+        Vec3 eye = player.getEyePosition();
+        Vec3 end =
+                eye.add(
+                        player.calculateViewVector(player.getXRot(), player.getYRot())
+                                .scale(player.blockInteractionRange()));
+        BlockHitResult seen =
+                player.level()
+                        .clip(
+                                new ClipContext(
+                                        eye,
+                                        end,
+                                        ClipContext.Block.OUTLINE,
+                                        ClipContext.Fluid.NONE,
+                                        player));
+        if (seen.getType() == HitResult.Type.BLOCK
+                && sameBed(player.level(), seen.getBlockPos(), used.getBlockPos())) {
+            return null;
+        }
+        return "the server's view of the player (yaw "
+                + player.getYRot()
+                + ", pitch "
+                + player.getXRot()
+                + ") was on "
+                + seen.getBlockPos().immutable()
+                + " ("
+                + seen.getType()
+                + ") when the use of the bed at "
+                + used.getBlockPos()
+                + " arrived";
     }
 
     private static boolean sameBed(Level level, BlockPos first, BlockPos second) {
