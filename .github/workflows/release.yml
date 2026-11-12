@@ -4,17 +4,19 @@ on:
     tags:
       - 'v*'
 
-# The build and the GameTests run third-party build code: only the job that publishes gets a write token.
 permissions:
   contents: read
 
 jobs:
-  # The strict build and the client GameTests, exactly as on every push; nothing is published unless both pass.
+  # The strict build and the client GameTests, exactly as on every push, with a read-only token;
+  # nothing is published unless both pass.
   verify:
     uses: ./.github/workflows/build.yml
     with:
       require_client_gametests: true
 
+  # Publishes the jar the verify job built. It runs no build code, so its write token never meets
+  # third-party plugins or dependencies.
   release:
     needs: verify
     runs-on: ubuntu-24.04
@@ -25,21 +27,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
-
-      - name: validate gradle wrapper
-        uses: gradle/actions/wrapper-validation@v5
-
-      - name: setup jdk
-        uses: actions/setup-java@v5
-        with:
-          java-version: '25'
-          distribution: 'microsoft'
-
-      - name: setup gradle
-        uses: gradle/actions/setup-gradle@v5
-
-      - name: make gradle wrapper executable
-        run: chmod +x ./gradlew
+          persist-credentials: false
 
       - name: verify tag matches mod version
         env:
@@ -51,21 +39,17 @@ jobs:
             exit 1
           fi
 
-      - name: build
-        run: ./gradlew clean build -PstrictQuality=true --warning-mode=fail
+      - name: download the verified build
+        uses: actions/download-artifact@v7
+        with:
+          name: Artifacts
+          path: build/libs
 
       - name: collect release artifacts
         run: |
           mkdir -p release-artifacts
           cp build/libs/*.jar release-artifacts/
           rm -f release-artifacts/*-dev.jar
-
-      - name: upload release artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: release-artifacts
-          path: release-artifacts/*.jar
-          if-no-files-found: error
 
       - name: read release notes from tag annotation
         id: notes
