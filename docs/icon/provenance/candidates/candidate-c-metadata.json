@@ -1,0 +1,55 @@
+{
+  "slug": "candidate-c",
+  "blender": "5.1.1",
+  "engine": "CYCLES CPU",
+  "samples": 96,
+  "threads": 4,
+  "seed": 0,
+  "denoise": true,
+  "resolution": [
+    1024,
+    1024
+  ],
+  "view_transform": "Standard",
+  "render_seconds": 20.18,
+  "camera": {
+    "type": "ORTHO",
+    "ortho_scale": 2.3318214416503906,
+    "location": [
+      -8.660077095031738,
+      10.91662883758545,
+      14.606124877929688
+    ],
+    "rotation_euler_deg": [
+      44.999994422049916,
+      -2.9244128576351572e-06,
+      -139.99999934239548
+    ],
+    "shift": [
+      0.0,
+      0.0
+    ]
+  },
+  "textures": {
+    "moon_waxing_crescent.png": "29412ef1fe5d7ad056d616163be824bae08208114eb5935da81c95517f933b02",
+    "red_bed_entity.png": "5ba40b3f414166bfc04960792a0d1c42a1da865d66173de1accb12f0353896d3",
+    "steve.png": "06628f9cef88520da742ab280a01677ce17c99717f964ed89ed791673121094c"
+  },
+  "scripts": {
+    "scene.py": "881a476143981c142c0744d558a3487b5f0169af26e04165aec3074ade36f157",
+    "mcmodel.py": "982b20a949b79b377722cf9b78d3ec0d093f4d50f7b5c2ab79f528b63ea3456a",
+    "render_c.py": "e2a80a86831f92a2e96f56b6042367ecfd192147897f0d434c4f4406343e65fc"
+  },
+  "png_sha256": "715c897e504ddfb88acdfe0fd34e27da6ac18413a8bcb2fa0a3857aa6e49266d",
+  "blend_sha256": "360424aed98eb4965c892ef4a5404d8478896cb585667015289a3ff3218f8965",
+  "subject": "default wide-arm player model with entity/player/wide/steve.png, in the sleeping pose, in the vanilla red bed facing south",
+  "head_block": [
+    0,
+    0,
+    0
+  ],
+  "facing": "south",
+  "azimuth_deg": -140.0,
+  "elevation_deg": 45.0,
+  "frame_margin": 0.06
+}

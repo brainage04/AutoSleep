@@ -1,0 +1,73 @@
+{
+  "slug": "candidate-b",
+  "blender": "5.1.1",
+  "engine": "CYCLES CPU",
+  "samples": 96,
+  "threads": 4,
+  "seed": 0,
+  "denoise": true,
+  "resolution": [
+    1024,
+    1024
+  ],
+  "view_transform": "Standard",
+  "render_seconds": 15.606,
+  "camera": {
+    "type": "ORTHO",
+    "ortho_scale": 2.8392975330352783,
+    "location": [
+      -11.208184242248535,
+      11.443408966064453,
+      11.431657791137695
+    ],
+    "rotation_euler_deg": [
+      57.0000015861695,
+      5.4967333249225625e-06,
+      -135.00000034162267
+    ],
+    "shift": [
+      0.0,
+      0.0
+    ]
+  },
+  "textures": {
+    "ascii.png": "e8646f1ed1f4bfd597d262cca3d8fac88ceaaa62807bbd5e607b2e3fe41c928a",
+    "moon_waxing_crescent.png": "29412ef1fe5d7ad056d616163be824bae08208114eb5935da81c95517f933b02",
+    "red_bed_entity.png": "5ba40b3f414166bfc04960792a0d1c42a1da865d66173de1accb12f0353896d3"
+  },
+  "scripts": {
+    "scene.py": "881a476143981c142c0744d558a3487b5f0169af26e04165aec3074ade36f157",
+    "mcmodel.py": "982b20a949b79b377722cf9b78d3ec0d093f4d50f7b5c2ab79f528b63ea3456a",
+    "render_b.py": "2670f0550a3fde18b7ff8695e5a6b7feffc115f0ab801a2bc06c7564b3888263"
+  },
+  "png_sha256": "0833810b089ac8a46e8ca88e0f97cf264465344359df24bb8ef0e4f136f02424",
+  "blend_sha256": "e270b6c98299b83b4a555733fcbb2e6aa1be3cd9fb2cda7070959a31723cc64e",
+  "subject": "vanilla red bed (BedRenderer head and foot models, entity/bed/red.png) facing south, with the ascii.png glyphs 'z' and 'Z' as one voxel per font pixel in ChatFormatting.AQUA",
+  "head_block": [
+    0,
+    0,
+    0
+  ],
+  "facing": "south",
+  "azimuth_deg": -135.0,
+  "elevation_deg": 33.0,
+  "frame_margin": 0.06,
+  "glyphs": [
+    {
+      "char": "z",
+      "screen_offset_from_pillow": [
+        0.12,
+        0.66
+      ],
+      "pixel_size": 0.06
+    },
+    {
+      "char": "Z",
+      "screen_offset_from_pillow": [
+        0.48,
+        1.16
+      ],
+      "pixel_size": 0.085
+    }
+  ]
+}
