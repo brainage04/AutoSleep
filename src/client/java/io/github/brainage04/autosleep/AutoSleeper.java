@@ -623,8 +623,9 @@ public final class AutoSleeper {
     }
 
     /**
-     * The nearest bed block that has not been given up tonight; in the world of a bed refused for
-     * monsters nearby, only that bed, until it is given up.
+     * The nearest bed block that has not been given up tonight. While the mod has not given up the
+     * bed refused for monsters nearby, it uses only that bed in that world. After the give-up it
+     * uses no bed in that world until the next day.
      */
     private @Nullable BlockPos findNearestBed(
             @Nullable Object world, ClientLevel level, LocalPlayer player) {
@@ -768,7 +769,11 @@ public final class AutoSleeper {
             return new NotSafe(night, head, true);
         }
 
-        /** Whether the mod may use this bed: in this world, only the refused one, not given up. */
+        /**
+         * Whether the mod may use this bed. While the mod has not given up the refused bed, it uses
+         * only that bed in that world. After the give-up it uses no bed in that world until the
+         * next day.
+         */
         boolean allows(@Nullable Object currentWorld, ClientLevel level, BlockPos bedHead) {
             return !night.inWorld(currentWorld)
                     || !givenUp && night.inDimension(currentWorld, level) && head.equals(bedHead);
