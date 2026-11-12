@@ -28,7 +28,7 @@ MARKER = re.compile(r"\[CLIENT_GAMETEST_RECORDER\] (\d{13}) (.*)$")
 LEAD = 0.10
 FADE_SECONDS = 0.03
 LOUDNESS_TARGET = -20.0
-# Below the -1.5 dBFS the delivered file may reach, because the AAC encode can raise a peak by a few tenths of a dB.
+# Half a dB under the -1.5 dBFS the delivered file may reach, as margin for the AAC encode.
 TRUE_PEAK_CEILING = -2.0
 QUIET_AT_CUT_DB = -45.0
 
