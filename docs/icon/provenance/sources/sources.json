@@ -1,0 +1,38 @@
+{
+  "1.21.11": {
+    "jar": "/home/thomas/.local/share/PrismLauncher/libraries/com/mojang/minecraft/1.21.11/minecraft-1.21.11-client.jar",
+    "jar_sha256": "1473c9489ac50fda3c435049a76a70d61a10b8610db27f5ba9d8756b686cd3bd",
+    "files": {
+      "red_bed_entity.png": {
+        "member": "assets/minecraft/textures/entity/bed/red.png",
+        "sha256": "5ba40b3f414166bfc04960792a0d1c42a1da865d66173de1accb12f0353896d3"
+      },
+      "steve.png": {
+        "member": "assets/minecraft/textures/entity/player/wide/steve.png",
+        "sha256": "06628f9cef88520da742ab280a01677ce17c99717f964ed89ed791673121094c"
+      },
+      "ascii.png": {
+        "member": "assets/minecraft/textures/font/ascii.png",
+        "sha256": "e8646f1ed1f4bfd597d262cca3d8fac88ceaaa62807bbd5e607b2e3fe41c928a"
+      },
+      "font_include_default.json": {
+        "member": "assets/minecraft/font/include/default.json",
+        "sha256": "e17f8a4289db15bf662df3ab623ad4dd9bda9d2b2e3e9e9e743234ff186bd0c4"
+      },
+      "moon_waxing_crescent.png": {
+        "member": "assets/minecraft/textures/environment/celestial/moon/waxing_crescent.png",
+        "sha256": "29412ef1fe5d7ad056d616163be824bae08208114eb5935da81c95517f933b02"
+      }
+    }
+  },
+  "1.8.9": {
+    "jar": "/home/thomas/.local/share/PrismLauncher/libraries/com/mojang/minecraft/1.8.9/minecraft-1.8.9-client.jar",
+    "jar_sha256": "14f0d96d1a56fb4f5c3b2233d00699525893fe5ce3dcf181e7de59120595d298",
+    "files": {
+      "bed_item_1.8.9.png": {
+        "member": "assets/minecraft/textures/items/bed.png",
+        "sha256": "2ec513aed15dfbee8bbb6e6766ee6c9d17447cbc294931eb1b3446b543e0e2e2"
+      }
+    }
+  }
+}

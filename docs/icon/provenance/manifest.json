@@ -1,0 +1,92 @@
+{
+  "a": {
+    "method": "pixel art",
+    "script": "pixel_a.py",
+    "sources": [
+      "bed_item_1.8.9.png",
+      "ascii.png",
+      "font_include_default.json"
+    ],
+    "master": {
+      "file": "candidates/candidate-a.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "bytes": 7329,
+      "sha256": "5becb0736c239269c0a60a14ca69edbecf7a8ce8668950633bf1c15596824f3e",
+      "pixels_sha256": "9457de1e425f4beb1d29c58a812fd8ff720149eed2577e0c59d57e27841c5cfe"
+    },
+    "in_jar": {
+      "file": "candidates/candidate-a-128.png",
+      "size": [
+        128,
+        128
+      ],
+      "bytes": 876,
+      "sha256": "60750a820bf81b52e544aac337400b1a4a1dec8cc8f47686f73d9c547857ed98",
+      "pixels_sha256": "c93d455980b4dd28cce25185bdb5a3fd0241b61cd47ef7866a5efdf84c82a336"
+    }
+  },
+  "b": {
+    "method": "Blender render",
+    "script": "render_b.py",
+    "metadata": "candidates/candidate-b-metadata.json",
+    "sources": [
+      "red_bed_entity.png",
+      "ascii.png",
+      "font_include_default.json",
+      "moon_waxing_crescent.png"
+    ],
+    "master": {
+      "file": "candidates/candidate-b.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "bytes": 862265,
+      "sha256": "0833810b089ac8a46e8ca88e0f97cf264465344359df24bb8ef0e4f136f02424",
+      "pixels_sha256": "82e913618ca031268e32aea28dc3d4a02675a1b090eb3fce59b9e92f7917503e"
+    },
+    "in_jar": {
+      "file": "candidates/candidate-b-128.png",
+      "size": [
+        128,
+        128
+      ],
+      "bytes": 14356,
+      "sha256": "49bbd396b06ee9bcd700123b4c9562db05b2e5062b3149530359ad08ff428874",
+      "pixels_sha256": "13180e0ab1952e1bfe12299f11bb7823f8a1f614bd48159f90fff19842cf5da2"
+    }
+  },
+  "c": {
+    "method": "Blender render",
+    "script": "render_c.py",
+    "metadata": "candidates/candidate-c-metadata.json",
+    "sources": [
+      "red_bed_entity.png",
+      "steve.png",
+      "moon_waxing_crescent.png"
+    ],
+    "master": {
+      "file": "candidates/candidate-c.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "bytes": 984534,
+      "sha256": "715c897e504ddfb88acdfe0fd34e27da6ac18413a8bcb2fa0a3857aa6e49266d",
+      "pixels_sha256": "c64f531848ef946f62736c23f54161437aa68dd0ae3523b365eef94210ddc38d"
+    },
+    "in_jar": {
+      "file": "candidates/candidate-c-128.png",
+      "size": [
+        128,
+        128
+      ],
+      "bytes": 19336,
+      "sha256": "5a8ef15b096d78ffe64a79831d3e330e720d25ec2eef1eb9a79904f7a6b2dc33",
+      "pixels_sha256": "a061976006a3671359aec4e3c12685be860e5fc6a11ecc101b4f48e5c4eb1dee"
+    }
+  }
+}
