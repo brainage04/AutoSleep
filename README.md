@@ -2,7 +2,9 @@
 
 AutoSleep is a client-side Fabric mod for Minecraft 1.21.11. Whenever the game would let you sleep (at night, or in a thunderstorm, in the Overworld) and you are not already in bed, it puts you to sleep in the nearest bed, walking you there if it is out of reach.
 
-It uses the bed for you exactly as a right click would, so it works on any server, including vanilla servers without the mod.
+It uses the bed as your own right click would, so servers need nothing installed.
+It does move you on its own: it turns your view and walks you with [Baritone](https://github.com/cabaletta/baritone), which many servers' rules forbid, so check a server's rules before you use it there.
+It was not tested against anti-cheat plugins.
 
 ## How it works
 
@@ -14,20 +16,36 @@ Servers do not send that rule to clients, so the mod gets it like this:
 - **On a server, in a vanilla dimension type** (`minecraft:...`): it uses vanilla's default rule, sleep when dark outside. The Nether and the End have no night, so beds there are never used.
 - **On a server, in any other dimension type:** it never uses a bed, because that dimension's beds may explode and the client cannot tell.
 
-If you may sleep in the bed and it is in reach (vanilla's 3 blocks horizontally and 2 vertically, and your block interaction range), the mod puts your view on the bed and right-clicks it on that same tick: it does not walk the view round, and it does not wait before using the bed.
-The bed is only ever used that way: the mod asks the game for the crosshair target itself, so it uses the bed only when you are looking at it and it is within your block interaction range, exactly as when you right-click it yourself.
-Otherwise [Baritone](https://github.com/cabaletta/baritone) walks you next to it first, and the walk starts on the same tick the game first lets you sleep rather than at the next retry. Baritone is bundled in the mod's jar and is set never to break or place blocks on the way.
+If you may sleep in the bed and it is in reach (vanilla's 3 blocks horizontally and 2 vertically, and your block interaction range), the mod puts your view on the bed in one frame and right-clicks it on the next tick, so the server has your new view before the click.
+The mod asks the game for the crosshair target itself, so it uses the bed only when the crosshair is on the bed itself and the bed is within your block interaction range, exactly as when you right-click it yourself.
+Otherwise Baritone walks you next to the bed first.
+On a server the walk starts on the first tick the game lets you sleep. In singleplayer it starts a second later, because the mod first asks the integrated server about that bed.
 
-After waking up the mod waits two seconds, because the server sends the new day time only once a second and the morning would otherwise still look like night.
+Baritone is bundled in the mod's jar. For its own walks the mod sets Baritone's `allowBreak`, `allowPlace` and `allowWaterBucketFall` to false, so a walk never breaks or places a block and never pours water to break a long fall. A walk does open doors and fence gates on the way, as Baritone always does.
+Your own values of those settings come back when the walk ends. The mod never starts a walk while a Baritone task of yours (a `#goto`, `#goal` or `#mine`) is running, and never cancels one.
+The mod turns off Baritone's `chatControl`, so a chat message that starts with a Baritone command, such as "help me" or "stop", goes to the server as chat. Messages that start with `#` still go to Baritone: `#stop` stops a walk, and the mod starts it again at its next try a second later.
 
-The mod assumes the simple case: the bed is free and not obstructed, no monsters are nearby and time runs normally.
-On a server it also assumes that no datapack changes the bed rule of a vanilla dimension type, of a biome or through a timeline.
-If the server refuses the bed anyway, you see the usual vanilla message and the mod tries again a second later.
+When you get out of bed, or something wakes you, while it is still night, the mod leaves you up until the next night.
+Waking up in the morning works the same way until your client sees the new day, which the server sends once a second.
+
+The mod waits, without turning your view, while you sneak with anything in either hand, because a right click then uses that item on the bed (placing a block on it, for example) instead of the bed.
+It does nothing while a screen is open (the pause menu, your inventory, the death screen) or while you are in spectator mode.
+
+If the crosshair cannot reach the bed (a floor, a wall or a cat in the way) or the server refuses it (monsters nearby, someone else in it), the mod tries that bed 3 times, tells you once in chat and leaves it alone until the next night.
+A bed that Baritone finds no way to is left alone at once, with a message too. Either way the mod then tries the next nearest bed.
+
+Using a bed sets your respawn point there, as your own right click does, even when the server then refuses sleep. The mod picks the nearest bed within 24 blocks, which may be a bed in a village or in someone else's base, so your respawn point can move to it.
+
+On a server the mod assumes that no datapack changes the bed rule of a vanilla dimension type, of a biome or through a timeline.
 
 ## Installing
 
 Put the mod JAR in the `mods` folder of a Fabric 1.21.11 client, together with [Fabric API](https://modrinth.com/mod/fabric-api).
 Servers need nothing.
+
+AutoSleep bundles the Baritone it needs, Baritone's API build (`baritone-api-fabric` 1.17.0).
+Baritone's standalone jar (`baritone-standalone-fabric`) replaces the bundled one and has no API, so with that jar in the `mods` folder AutoSleep turns itself off and says so in chat.
+A `baritone-api-fabric` 1.17.0 jar of your own works.
 
 ## Development
 
@@ -41,7 +59,7 @@ Servers need nothing.
 ./gradlew test
 ```
 
-runs the Fabric-aware metadata tests and the `BedLook` turn tests in `src/test/java`.
+runs the Fabric-aware metadata tests, the `BedLook` turn tests and `BaritoneMissingTest`, which starts the mod with Baritone's API hidden, as Baritone's standalone jar hides it, and checks that it turns itself off instead of crashing.
 
 The client GameTests in `src/gametest` run these steps in order. Each step's number and id show in the recording panel in the top-right corner (a 1.21.11 port of MinecraftModConventions' recording HUD), and the log has a `[CLIENT_GAMETEST_RECORDER]` line for it. The top-left panel shows the day time out of 24000, the Overworld's night by the clock, the dimension, and whether the client sees it as night.
 
@@ -50,13 +68,14 @@ The client GameTests in `src/gametest` run these steps in order. Each step's num
 |Step|Id|Situation|By day|At nightfall|
 |---|---|---|---|---|
 |1|`out-of-reach`|the red bed four and a half blocks away|does nothing, does not even turn|starts walking within two ticks, reaches the bed, looks at it and sleeps|
-|2|`in-reach`|the red bed in reach and in view, 30 degrees beside the crosshair|does nothing, does not even turn|looks at the bed and uses it within two ticks, then sleeps|
+|2|`in-reach`|the red bed in reach and in view, 30 degrees beside the crosshair|does nothing, does not even turn|turns to the bed at once and uses it on the next tick, within two ticks of nightfall, then sleeps|
 |3|`nearest-bed-blue`|both beds on camera, the blue bed nearer|does nothing, does not even turn|starts walking within two ticks to the blue bed, not the red one, and sleeps|
 |4|`nearest-bed-red`|the same two beds, the red bed nearer|does nothing, does not even turn|starts walking within two ticks to the red bed and sleeps|
 
 After each night the test checks the player stays up once the night is skipped.
 
-Every bed use is checked through a `UseBlockCallback` handler on the client, where the mod made the decision: the game's crosshair target must be that bed, the player's eye must be within the vanilla 4.5-block block interaction range of it, and neither interaction range may have been modified.
+Every bed use is checked through a `UseBlockCallback` handler on the client, where the mod made the decision: the game's crosshair target must be a block hit on that bed, the player's eye must be within the vanilla 4.5-block block interaction range of it, and neither interaction range may have been modified.
+The same handler on the server checks that the player's view, as the server last received it, was already on that bed when the use arrived.
 A use that fails any of those, or any use while the player is out of reach of the bed, fails the test.
 
 `BedRuleClientGameTest` checks the bed rules, first in a singleplayer world and then on a dedicated server, at midnight with a bed 8 blocks away. The test datapack in `src/gametest/resources/data/autosleep_test` adds two dimensions with a day-night cycle, `exploding_beds`, whose beds explode although they allow sleep, and `allowed_beds`, whose beds work, and a biome `exploding_beds` whose beds explode.
@@ -70,12 +89,29 @@ A use that fails any of those, or any use while the player is out of reach of th
 |9|`singleplayer-exploding_biome-bed`|walking to a bed in `allowed_beds`, put beside a second bed in the exploding biome: never uses the second bed|
 |10|`singleplayer-other_dimension-bed`|walking to the bed in `allowed_beds`, put beside the bed at the same position in `exploding_beds`: never uses it|
 |11|`singleplayer-stale_answer-bed`|walking to the bed in `allowed_beds`, out of range for 4 s while its biome becomes the exploding one, then back beside it: never uses it|
-|12|`singleplayer-overworld-bed`|walks to the bed and sleeps, stays up after the night is skipped|
-|13|`dedicated-the_nether-bed`|stays put, never uses the bed|
-|14|`dedicated-the_end-bed`|stays put, never uses the bed|
-|15|`dedicated-exploding_beds-bed`|stays put, never uses the bed|
-|16|`dedicated-allowed_beds-bed`|stays put: the client cannot see this dimension's bed rule|
-|17|`dedicated-overworld-bed`|walks to the bed and sleeps, stays up after the night is skipped|
+|12|`singleplayer-next_night-bed`|walking to the bed in `allowed_beds`, then day comes, its biome becomes the exploding one, and the next night falls with the player beside it: never uses it|
+|13|`singleplayer-overworld-bed`|walks to the bed and sleeps, stays up after the night is skipped|
+|14|`dedicated-the_nether-bed`|stays put, never uses the bed|
+|15|`dedicated-the_end-bed`|stays put, never uses the bed|
+|16|`dedicated-exploding_beds-bed`|stays put, never uses the bed|
+|17|`dedicated-allowed_beds-bed`|stays put: the client cannot see this dimension's bed rule|
+|18|`dedicated-overworld-bed`|walks to the bed and sleeps, stays up after the night is skipped|
+
+Each of those steps starts its night from a day, because a player woken at night stays up until the next night.
+
+`SafeguardsClientGameTest` checks, on a dedicated server, what the player keeps control of and what the mod does with a bed it cannot use. Each step builds its own stage by day and then sets midnight with time stopped.
+
+|Step|Id|Situation|Expected|
+|---|---|---|---|
+|19|`chat-reaches-the-server`|the player chats "help me", which starts with a Baritone command|the server receives the message|
+|20|`stays-up-after-leaving-the-bed`|a bed in reach, the player sleeps and then leaves the bed|no bed use for 10 s, then sleeps again the next night|
+|21|`sneaking-with-blocks`|a bed in reach, the player sneaking with planks in hand|no turn, no use and nothing placed on the bed, then sleeps once the player stops sneaking|
+|22|`bed-under-the-floor`|the nearest bed under the floor the player stands on, an open bed 8 blocks away|tells the player once that it leaves the first bed alone, then sleeps in the open bed|
+|23|`crosshair-short-of-the-bed`|a bed in reach whose centre is beyond the 4.5-block interaction range, so the game's pick ends above it|never uses it, tells the player once, then leaves the view alone|
+|24|`bed-in-a-pit`|the nearest bed at the bottom of a 6-block shaft, a water bucket in hand, an open bed farther away|no water ever in the shaft, full health, tells the player once that it found no way to the first bed, sleeps in the open bed|
+|25|`own-baritone-goal`|the player's own Baritone goal set by day, then nightfall|keeps the player's goal at night and at daybreak, turns off `allowBreak`, `allowPlace` and `allowWaterBucketFall` only during its own walk, and gives them back after `#stop` and after sleeping|
+|26|`screen-open`|a bed in reach, the inventory open|no turn and no use while it is open, sleeps once it is closed|
+|27|`spectator`|a bed in reach, the player in spectator mode|no turn and no use, sleeps once back in survival|
 
 ```shell
 ./gradlew runClientGameTest
@@ -105,4 +141,4 @@ Release automation is documented in [docs/RELEASE.md](docs/RELEASE.md).
 ## Credits
 
 Generated from [ModernMinecraftModTemplate](https://github.com/brainage04/ModernMinecraftModTemplate) (its last Fabric 1.21.11 version).
-Bundles [Baritone](https://github.com/cabaletta/baritone) 1.17.0 (LGPL-3.0) for walking to the bed.
+Bundles [Baritone](https://github.com/cabaletta/baritone) 1.17.0 for walking to the bed, unmodified. Baritone is under the GNU LGPL 3.0: see `NOTICE`, `COPYING.LESSER` and `COPYING`, which the mod's jar carries too. Its source for this version is at <https://github.com/cabaletta/baritone/tree/v1.17.0>.

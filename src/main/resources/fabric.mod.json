@@ -3,7 +3,7 @@
 	"id": "${mod_id}",
 	"version": "${mod_version}",
 	"name": "${mod_name}",
-	"description": "Puts you to sleep in the nearest bed when night falls, walking there if it is out of reach. Client-side only: works on any server.",
+	"description": "Puts you to sleep in the nearest bed when night falls, walking there with the bundled Baritone if it is out of reach. Client-side only: servers need nothing installed.",
 	"authors": [
 		"brainage04"
 	],
