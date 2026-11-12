@@ -169,8 +169,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
                                 return level.getHeight(Heightmap.Types.MOTION_BLOCKING, 0, 0);
                             });
             // Ten blocks apart and both facing the player, so a scenario can stand nearer either
-            // one and show that the
-            // mod picks the nearest bed rather than a fixed one.
+            // one and show that the mod picks the nearest bed rather than a fixed one.
             redBed = new BlockPos(0, y, 8);
             blueBed = new BlockPos(10, y, 8);
             server.runOnServer(minecraftServer -> placeScene(minecraftServer.overworld()));
@@ -190,10 +189,9 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
                     });
 
             // Every scenario is one shot of one setup: by day the mod must do nothing, then night
-            // falls on the same
-            // setup and it must act at once. The setup happens before the step marker, which the
-            // cut starts after,
-            // so each clip opens on its scene, already in place.
+            // falls on the same setup and it must act at once. The setup happens before the step
+            // marker, which the cut starts after, so each clip opens on its scene, already in
+            // place.
             startScenario(
                     "out-of-reach",
                     "Day, the red bed 4.5 blocks away: nothing happens.",
@@ -216,8 +214,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
             assertStaysStill("by day, in reach", DAY_CHECK_TICKS);
             nightFalls();
             // The use itself, not the sleeping state: the pose reaches the client a tick or two
-            // after the server
-            // accepts it, and this is what the mod decides on its own.
+            // after the server accepts it, and this is what the mod decides on its own.
             int ticksToUse = context.waitFor(client -> clientBedUses.get() > 0, 20);
             if (ticksToUse > TICKS_TO_ACT) {
                 throw new AssertionError(

@@ -94,15 +94,14 @@ public final class AutoSleeper {
             // Nothing asked before the night was skipped may be used in the morning.
             lastQuestion = null;
             // The player is in bed, so the game let them sleep: waking up in a stale night must not
-            // look like nightfall
-            // and must not cut the wake-up grace short.
+            // look like nightfall and must not cut the wake-up grace short.
             maySleepHere = true;
             return;
         }
 
         // Read every tick, because the answer changes with the time of day, and the client's day
-        // time is exact: the
-        // walk starts on the first tick the game would let the player sleep, not on the next retry.
+        // time is exact: the walk starts on the first tick the game would let the player sleep, not
+        // on the next retry.
         IntegratedServer server = minecraft.getSingleplayerServer();
         boolean allowedNow =
                 server != null
@@ -119,8 +118,7 @@ public final class AutoSleeper {
             if (walkingTo != null && !walkActive && !walkEnded) {
                 walkEnded = true;
                 // The walk has just stopped: if it stopped beside the bed, use it on this tick
-                // rather than standing
-                // next to it until the next retry.
+                // rather than standing next to it until the next retry.
                 if (inReach(player, walkingTo)) {
                     cooldownTicks = 0;
                 }
@@ -140,9 +138,8 @@ public final class AutoSleeper {
         cooldownTicks = RETRY_INTERVAL_TICKS;
 
         // Every attempt takes the answer to the previous attempt's question, if any, and asks
-        // afresh only when it
-        // finds a bed in singleplayer: an attempt that asks nothing leaves nothing for the next one
-        // to use.
+        // afresh only when it finds a bed in singleplayer: an attempt that asks nothing leaves
+        // nothing for the next one to use.
         Question previousQuestion = lastQuestion;
         ServerAnswer previousAnswer = serverAnswer;
         lastQuestion = null;
@@ -262,11 +259,9 @@ public final class AutoSleeper {
      */
     private static boolean remoteServerAllows(ClientLevel level, BlockPos pos) {
         // vanilla-identity: the client cannot see BED_RULE (see above), so it can only rely on the
-        // rule of a vanilla
-        // dimension type, as long as the server's datapacks leave it alone: the Nether and the End
-        // have fixed time, so
-        // the default rule never lets anyone sleep there. Any other dimension type may make beds
-        // explode.
+        // rule of a vanilla dimension type, as long as the server's datapacks leave it alone: the
+        // Nether and the End have fixed time, so the default rule never lets anyone sleep there.
+        // Any other dimension type may make beds explode.
         if (!level.dimensionTypeRegistration()
                 .is(key -> key.identifier().getNamespace().equals(Identifier.DEFAULT_NAMESPACE))) {
             return false;
