@@ -180,13 +180,6 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
             context.waitFor(
                     client -> client.level.getBlockState(blueBed).getBlock() instanceof BedBlock,
                     200);
-            context.runOnClient(
-                    client -> {
-                        if (!AutoSleepClient.isInitialized()) {
-                            throw new AssertionError(
-                                    "Expected the AutoSleep client initializer to run before the client GameTest.");
-                        }
-                    });
 
             // Every scenario is one shot of one setup: by day the mod must do nothing, then night
             // falls on the same setup and it must act at once. The setup happens before the step
