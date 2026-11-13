@@ -30,8 +30,7 @@ bin/
 
 # fabric
 
-run/*
-!run/options.txt
+**/run/*
 logs/
 
 # java
