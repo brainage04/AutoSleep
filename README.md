@@ -68,6 +68,12 @@ A `baritone-api-fabric` 1.17.0 jar of your own works.
 
 runs the Fabric-aware metadata tests, the `BedLook` turn tests and `BaritoneMissingTest`, which starts the mod with Baritone's API hidden, as Baritone's standalone jar hides it, and checks that it turns itself off instead of crashing.
 
+```shell
+./gradlew propertyTest
+```
+
+runs the jqwik tests on their own, outside the Fabric loader (`build.gradle` says why); `check` and `build` run them too. `ClockTest` checks that no tick counter's clock counts a tick in which the game is paused, and that every tick the player clock counts the world clock counts too. `FailedTriesTest` checks that a bed is given up exactly when its failed tries reach `TRIES_PER_BED`, stays given up until the next night, and that the player is told once. `DayNumberTest` checks that a night everyone slept through always ends in the next day number, which is what ends a stay-up. `./gradlew pitest` runs mutation tests on `FailedTries` and `Clock` against their tests; it is not part of `check`, and the report is written to `build/reports/pitest`.
+
 The client GameTests in `src/gametest` run these steps in order. Each step's number and id show in the recording panel in the top-right corner (a 1.21.11 port of MinecraftModConventions' recording HUD), and the log has a `[CLIENT_GAMETEST_RECORDER]` line for it. The top-left panel shows the day time out of 24000, the Overworld's night by the clock, the dimension, and whether the client sees it as night.
 
 `AutoSleepClientGameTest` starts a dedicated server without the mod, joins it and loads a saved scene, `data/autosleep_test/structure/bedroom.nbt`: an oak plank floor with a red and a blue bed ten blocks apart, out of reach of the player. Each step is one setup filmed twice: about two seconds by day, where the mod must do nothing, then nightfall on the same setup, where it must act at once.

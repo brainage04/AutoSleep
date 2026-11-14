@@ -6,6 +6,7 @@ import io.github.brainage04.minecraftmodconventions.gradle.quality.WorldHeightCh
 plugins {
 	id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
 	id 'io.github.brainage04.java-quality-conventions' version "${minecraftmodconventions_version}"
+	id 'info.solidsoft.pitest' version '1.19.0'
 }
 
 version = project.mod_version
@@ -55,6 +56,11 @@ dependencies {
 	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 	testImplementation "net.fabricmc:fabric-loader-junit:${project.loader_version}"
+	// jqwik 1.10.2 is built on JUnit Platform 1.14, so the JUnit modules follow the same release line.
+	testImplementation platform('org.junit:junit-bom:5.14.4')
+	testImplementation 'org.junit.jupiter:junit-jupiter'
+	testImplementation 'net.jqwik:jqwik:1.10.2'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
 	// DevAuth
 	modRuntimeOnly("me.djtheredstoner:DevAuth-fabric:1.2.2")
@@ -240,6 +246,40 @@ jar {
 }
 
 test {
-	useJUnitPlatform()
+	useJUnitPlatform {
+		excludeEngines 'jqwik'
+	}
 	systemProperty "fabric.side", "client"
+}
+
+// The jqwik tests run on their own, outside the Fabric loader: inside it jqwik finds no @Property methods (MagicCarpet's
+// CarpetMotionTest ran 6 of its 10 tests there, 14 Nov 2026), and they need no loader. The other unit tests need it.
+def propertyTest = tasks.register('propertyTest', Test) {
+	description = 'Runs the jqwik tests without the Fabric loader.'
+	group = 'verification'
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath.filter { !it.name.startsWith('fabric-loader-junit') }
+	useJUnitPlatform {
+		includeEngines 'jqwik'
+	}
+}
+tasks.named('check') {
+	dependsOn propertyTest
+}
+
+pitest {
+	pitestVersion = '1.30.2'
+	junit5PluginVersion = '1.2.3'
+	mainSourceSets = [sourceSets.main, sourceSets.client]
+	targetClasses = ['io.github.brainage04.autosleep.FailedTries', 'io.github.brainage04.autosleep.Clock']
+	targetTests = ['io.github.brainage04.autosleep.FailedTriesTest', 'io.github.brainage04.autosleep.ClockTest']
+	threads = 1
+	timeoutConstInMillis = 5000
+	outputFormats = ['HTML', 'XML']
+	timestampedReports = false
+}
+tasks.named('pitest') {
+	// With fabric-loader-junit on the classpath PIT records no coverage (SimpleTwitchChat measured 0 of 90 lines).
+	def classpath = files(additionalClasspath.from.toList())
+	additionalClasspath.setFrom(classpath.filter { !it.name.startsWith('fabric-loader-junit') })
 }

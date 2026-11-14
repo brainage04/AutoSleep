@@ -11,9 +11,7 @@ import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalGetToBlock;
 import baritone.api.process.IBaritoneProcess;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.Minecraft;
@@ -166,7 +164,7 @@ public final class AutoSleeper {
     private boolean playerChatControl;
 
     /** Tonight's failed tries per bed; a bed at {@link #TRIES_PER_BED} is left alone. */
-    private final Map<Question, Integer> failedTries = new HashMap<>();
+    private final FailedTries<Question> failedTries = new FailedTries<>(TRIES_PER_BED);
 
     /**
      * The bed the view was put on last tick. It is used on this tick, after the player's tick has
@@ -416,10 +414,7 @@ public final class AutoSleeper {
 
     /** Counts failed tries on a bed, and tells the player once when the bed is given up. */
     private void fail(LocalPlayer player, Question bed, int tries, String message) {
-        int before = failedTries.getOrDefault(bed, 0);
-        int after = Math.min(TRIES_PER_BED, before + tries);
-        failedTries.put(bed, after);
-        if (before < TRIES_PER_BED && after == TRIES_PER_BED) {
+        if (failedTries.add(bed, tries)) {
             tell(player, message, bed.head());
         }
     }
@@ -427,10 +422,6 @@ public final class AutoSleeper {
     private static void tell(LocalPlayer player, String message, BlockPos head) {
         player.displayClientMessage(
                 Component.translatable(message, head.getX(), head.getY(), head.getZ()), false);
-    }
-
-    private boolean givenUp(Question bed) {
-        return failedTries.getOrDefault(bed, 0) >= TRIES_PER_BED;
     }
 
     /**
@@ -648,7 +639,7 @@ public final class AutoSleeper {
                 continue;
             }
             BlockPos head = bedHead(level, pos);
-            if (!givenUp(new Question(level, head))
+            if (!failedTries.givenUp(new Question(level, head))
                     && (notSafe == null || notSafe.allows(world, level, head))) {
                 nearest = pos.immutable();
                 nearestDistance = distance;
@@ -780,34 +771,12 @@ public final class AutoSleeper {
         }
     }
 
-    /**
-     * Which ticks a tick counter counts; {@link #counts} decides, and each counter names its clock
-     * where it is declared. No clock counts a tick in which a singleplayer game is paused: the
-     * integrated server then stands still (IntegratedServer.java:111-121 in 1.21.11), and so do the
-     * world, its monsters and the time the server sends.
-     */
-    private enum Clock {
-        /** Every tick in which the world runs; an open screen does not stop it. */
-        WORLD,
-
-        /**
-         * The ticks in which the player could right-click: the world runs, no screen is open and
-         * the player is not in spectator mode.
-         */
-        PLAYER
-    }
-
     private static boolean counts(Minecraft minecraft, Clock clock) {
-        if (minecraft.isPaused()) {
-            return false;
-        }
-        return switch (clock) {
-            case WORLD -> true;
-            case PLAYER ->
-                    minecraft.screen == null
-                            && minecraft.player != null
-                            && !minecraft.player.isSpectator();
-        };
+        return clock.counts(
+                minecraft.isPaused(),
+                minecraft.screen == null
+                        && minecraft.player != null
+                        && !minecraft.player.isSpectator());
     }
 
     /**
@@ -824,7 +793,15 @@ public final class AutoSleeper {
     }
 
     private static long dayOf(ClientLevel level) {
-        return level.getDayTime() / SharedConstants.TICKS_PER_GAME_DAY;
+        return dayOf(level.getDayTime());
+    }
+
+    /**
+     * The day number, as the server counts it in {@code ServerLevel#getDayCount}
+     * (ServerLevel.java:476-478 in 1.21.11), which only a server level has.
+     */
+    static long dayOf(long dayTime) {
+        return dayTime / SharedConstants.TICKS_PER_GAME_DAY;
     }
 
     /** The player's own values of the Baritone settings a walk changes. */
