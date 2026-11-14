@@ -102,4 +102,4 @@ cp provenance/candidates/candidate-X.png icon.png
 cp provenance/candidates/candidate-X-128.png ../../src/main/resources/assets/autosleep/icon.png
 ```
 
-Both `src/main/resources/fabric.mod.json` and `src/gametest/resources/fabric.mod.json` declare `"icon": "assets/autosleep/icon.png"`. After the pick, rewrite this README to describe the shipped icon and its hashes, and drop the unchosen candidates' scripts from `provenance/`.
+`src/main/resources/fabric.mod.json` declares `"icon": "assets/autosleep/icon.png"`. The GameTest mod's `src/gametest/resources/fabric.mod.json` declares no icon, because its resources hold no `assets/` tree. The pick is done: this README describes the shipped icon and its hashes, and the B and C scripts, scenes and 128 px copies stay in `provenance/` as the record of the candidates the owner compared.

@@ -3,7 +3,6 @@
 	"id": "${mod_id}-gametest",
 	"version": "${mod_version}",
 	"name": "${mod_name} Game Tests",
-	"icon": "assets/autosleep/icon.png",
 	"environment": "client",
 	"mixins": [
 		"autosleep-gametest.mixins.json"
