@@ -5,8 +5,9 @@ import net.minecraft.world.phys.Vec3;
 
 /**
  * The view that puts the crosshair on a block. A player turns with the mouse in one motion and then
- * right-clicks, so the mod does the same thing without spending ticks on it: one look, then the use
- * on that same tick.
+ * right-clicks, so the mod turns the view in one frame and uses the bed on the next client tick:
+ * the player's own tick must send the new view to the server before the use (see {@code
+ * AutoSleeper.use}).
  */
 final class BedLook {
     private BedLook() {}
