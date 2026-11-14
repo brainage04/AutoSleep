@@ -68,6 +68,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: release-artifacts/*.jar
+          fail_on_unmatched_files: true
           body: ${{ steps.notes.outputs.body }}
           generate_release_notes: ${{ steps.notes.outputs.body == '' }}
           prerelease: ${{ contains(github.ref_name, '-') }}
