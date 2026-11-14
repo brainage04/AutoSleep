@@ -77,7 +77,7 @@ def main() -> None:
                   "every cut"
                   if has_audio else "none"),
         "ownerAsks": args.ask,
-        "repository": "AutoSleep, branch rec2 (GitHub brainage04/AutoSleep), /home/thomas/01_TM/Coding/Minecraft/AutoSleep",
+        "repository": "AutoSleep (GitHub brainage04/AutoSleep), /home/thomas/01_TM/Coding/Minecraft/AutoSleep",
         "commits": args.commit,
         "recordedOn": args.host,
         "jobPeakMemory": args.peak,
