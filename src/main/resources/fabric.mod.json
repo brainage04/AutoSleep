@@ -9,7 +9,8 @@
 	],
 	"contact": {
 		"homepage": "https://github.com/brainage04/AutoSleep",
-		"sources": "https://github.com/brainage04/AutoSleep"
+		"sources": "https://github.com/brainage04/AutoSleep",
+		"issues": "https://github.com/brainage04/AutoSleep/issues"
 	},
 	"license": "MIT",
 	"icon": "assets/autosleep/icon.png",
