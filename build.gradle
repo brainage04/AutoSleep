@@ -66,11 +66,11 @@ dependencies {
 }
 
 processResources {
-	inputs.property "mod_id", project.properties.mod_id
+	inputs.property "mod_id", project.property("mod_id")
 	inputs.property "mod_version", project.version
-	inputs.property "mod_name", project.properties.mod_name
-	inputs.property "loader_version", project.properties.loader_version
-	inputs.property "minecraft_version", project.properties.minecraft_version
+	inputs.property "mod_name", project.property("mod_name")
+	inputs.property "loader_version", project.property("loader_version")
+	inputs.property "minecraft_version", project.property("minecraft_version")
 
 	filesMatching("fabric.mod.json") {
 	expand([
@@ -148,9 +148,9 @@ WorldHeightCheck.register(project)
 DeprecatedGameTestApiCheck.register(project)
 
 tasks.named("processGametestResources") {
-	inputs.property "mod_id", project.properties.mod_id
+	inputs.property "mod_id", project.property("mod_id")
 	inputs.property "mod_version", project.version
-	inputs.property "mod_name", project.properties.mod_name
+	inputs.property "mod_name", project.property("mod_name")
 
 	filesMatching("fabric.mod.json") {
 		expand([
