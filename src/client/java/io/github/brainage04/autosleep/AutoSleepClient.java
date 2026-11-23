@@ -10,7 +10,7 @@ public class AutoSleepClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-        // Walk to the bed only: never dig through or build on someone's base on the way.
+        // Baritone breaks and places blocks by default (Settings.java:63,78); a walk to a bed must not.
         Settings settings = BaritoneAPI.getSettings();
         settings.allowBreak.value = false;
         settings.allowPlace.value = false;

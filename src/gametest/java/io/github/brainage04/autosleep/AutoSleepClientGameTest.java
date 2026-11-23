@@ -52,7 +52,6 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
      * two seconds in which the mod must do nothing, before night falls on the same setup.
      */
     private static final int DAY_CHECK_TICKS = 30;
-    /** Ticks for the player to settle after a teleport, before the scenario starts on camera. */
     private static final int SETTLE_TICKS = 5;
     private static final int AWAKE_CHECK_TICKS = AutoSleeper.RETRY_INTERVAL_TICKS * 5;
     private static final int WALK_AND_SLEEP_TIMEOUT_TICKS = 200;
@@ -70,7 +69,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
      * bed is short enough to show at once.
      */
     private static final double RED_BED_FOUR_AND_A_HALF_BLOCKS_AWAY_Z = 2.5D;
-    /** In reach of the red bed, 2.7 blocks north of its foot, inside the reach box. */
+    /** In reach of the red bed's foot, 2.2 blocks north of it, inside the reach box. */
     private static final double IN_REACH_OF_THE_RED_BED_Z = 4.8D;
     /** The red bed is south of the start position, at larger Z: looking at it is yaw 0. */
     private static final float TOWARD_THE_RED_BED = 0.0F;
@@ -128,8 +127,8 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
                 level.getGameRules().set(GameRules.SHOW_ADVANCEMENT_MESSAGES, false, minecraftServer);
                 return level.getHeight(Heightmap.Types.MOTION_BLOCKING, 0, 0);
             });
-            // Ten blocks apart and both facing the player, so a scenario can stand nearer either one and show that the
-            // mod picks the nearest bed rather than a fixed one.
+            // Ten blocks apart, so a scenario can stand nearer either one and show that the mod picks the nearest bed
+            // rather than a fixed one.
             redBed = new BlockPos(0, y, 8);
             blueBed = new BlockPos(10, y, 8);
             server.runOnServer(minecraftServer -> placeScene(minecraftServer.overworld()));
@@ -165,7 +164,8 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
             assertStaysStill("by day, in reach", DAY_CHECK_TICKS);
             nightFalls();
             // The use itself, not the sleeping state: the pose reaches the client a tick or two after the server
-            // accepts it, and this is what the mod decides on its own.
+            // accepts it, as synced entity data ({@code LivingEntity.java:189}), and this is what the mod decides on its
+            // own.
             int ticksToUse = context.waitFor(client -> clientBedUses.get() > 0, 20);
             if (ticksToUse > TICKS_TO_ACT) {
                 throw new AssertionError("Expected the bed to be used within " + TICKS_TO_ACT + " ticks of the client"
@@ -205,8 +205,8 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
     }
 
     /**
-     * Loads the pre-built scene, a saved structure, and checks the beds landed where the scenarios expect them: a moved
-     * structure would otherwise show up only as a walk to the wrong place.
+     * Loads the pre-built scene and checks the beds landed where the scenarios expect them: a moved structure would
+     * otherwise show up only as a walk to the wrong place.
      */
     private void placeScene(ServerLevel level) {
         StructureTemplate scene = level.getServer().getStructureManager().get(SCENE)
@@ -240,7 +240,6 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
         step(id, title, expected);
     }
 
-    /** Dusk, ten ticks before night, then waits until the client sees night. */
     private void nightFalls() {
         command("time set " + TEN_TICKS_BEFORE_NIGHT);
         int ticksToNight = context.waitFor(client -> client.level.isDarkOutside(), 100);
@@ -273,7 +272,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
      * Stands the player at a spot and turns the view so both beds sit in the middle of it, half each side: the yaw
      * between them, the short way round. The position goes first, because the turn is measured from where the player
      * now is; the second teleport is absolute, since relative coordinates in {@code /tp} resolve against the command
-     * source and would put the player at the world spawn instead.
+     * source ({@code TeleportCommand.java:200}) and would put the player at the world spawn instead.
      */
     private void standBetweenTheBeds(double x, double z) {
         teleport(x, z, TOWARD_THE_RED_BED);
@@ -329,7 +328,8 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
         ClientGameTestRecordingHud.log((beds.length == 1 ? "The bed is" : "Both beds are") + " on camera " + when);
     }
 
-    /** The eight corners of each half of a bed: the block footprint's corners at its base and at its top. */
+    /** The eight corners of each half of a bed: the block footprint's corners at its base and at its top, 9/16 high
+     * ({@code BedBlock.java:60}). */
     private static List<Vec3> bedCorners(Level level, BlockPos bed) {
         BlockState state = level.getBlockState(bed);
         BlockPos other = state.getValue(BedBlock.PART) == BedPart.HEAD
@@ -395,7 +395,8 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
 
     /**
      * Empties the chat box before a scenario starts, so each clip shows only the lines its own scene earns. Called
-     * before the step marker, which the cut starts 0.10 s after, so the clear itself is never on camera.
+     * before the step marker, which the cut starts 0.10 s after ({@code trim-scenarios.py:28}), so the clear itself is
+     * never on camera.
      */
     private void clearChat() {
         context.runOnClient(client -> client.gui.getChat().clearMessages(false));

@@ -10,8 +10,8 @@ public final class AutoSleepGameTestClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-        // The recording shows the mod working with Baritone's own overlay and chat: the goal box and path line in the
-        // world, and the path Baritone reports in chat. Baritone's defaults draw the first and keep the second quiet.
+        // The recording shows Baritone's own overlay and chat: its defaults draw the goal box and path line
+        // (Settings.java:695,705) and keep the path it reports in chat quiet (Settings.java:679).
         Settings settings = BaritoneAPI.getSettings();
         settings.chatDebug.value = true;
 

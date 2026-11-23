@@ -14,8 +14,8 @@ import java.util.List;
 
 /**
  * The recording panel of MinecraftModConventions' {@code ClientGameTestRecordingHud}, drawn with the 1.21.11 GUI API
- * (the conventions runtime itself needs Minecraft 26.2): the current step's id, title and expected result, and the last
- * few things the test saw, in the top-right corner clear of chat.
+ * (the conventions runtime itself needs Minecraft 26.2, {@code gradle.properties:11}): the current step's id, title and
+ * expected result, and the last few things the test saw, in the top-right corner clear of chat.
  */
 public final class ClientGameTestRecordingHud {
     private static final Identifier HUD_ID = Identifier.fromNamespaceAndPath(AutoSleep.MOD_ID, "gametest_recording_feedback");
@@ -60,7 +60,8 @@ public final class ClientGameTestRecordingHud {
         if (cleaned.isBlank()) {
             return;
         }
-        // The epoch millis let the recording be trimmed against this log; the recorded capture starts at ffmpeg-start.
+        // The epoch millis let the recording be trimmed against this log; the recorded capture starts at ffmpeg-start
+        // ({@code trim-scenarios.py:25}).
         System.out.println("[CLIENT_GAMETEST_RECORDER] " + System.currentTimeMillis() + " - " + cleaned);
         addLogLine(cleaned);
     }
@@ -83,7 +84,7 @@ public final class ClientGameTestRecordingHud {
         Font font = client.font;
         int screenWidth = client.getWindow().getGuiScaledWidth();
         int maxWidth = Math.min(MAX_WIDTH, screenWidth - DayNightCycleHud.rightEdge(client) - SCREEN_MARGIN * 2 - PANEL_PADDING * 2);
-        // Long lines wrap instead of ending in an ellipsis: a caption that is cut off tells the viewer nothing.
+        // Lines wrap at word boundaries; only a single word wider than the panel is cut, with an ellipsis.
         List<String> texts = new ArrayList<>();
         List<Integer> colors = new ArrayList<>();
         for (HudLine line : lines()) {

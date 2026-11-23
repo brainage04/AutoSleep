@@ -11,13 +11,10 @@ base {
 }
 
 repositories {
-	// Loom / Minecraft / Fabric
 	mavenCentral()
 	mavenLocal()
 	maven { url "https://libraries.minecraft.net" }
 	maven { url "https://maven.fabricmc.net/" }
-
-	// DevAuth
 	maven { url = "https://pkgs.dev.azure.com/djtheredstoner/DevAuth/_packaging/public/maven/v1" }
 
 	// Baritone publishes its Fabric jars only as GitHub release assets.
@@ -51,8 +48,6 @@ dependencies {
 	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 	testImplementation "net.fabricmc:fabric-loader-junit:${project.loader_version}"
-
-	// DevAuth
 	modRuntimeOnly("me.djtheredstoner:DevAuth-fabric:1.2.2")
 
 	// Walks the player to a bed out of reach; shipped inside the mod's jar, nether-pathfinder included.
@@ -91,9 +86,8 @@ loom {
 
 	runs {
 		matching { it.name == "clientGameTest" }.configureEach {
-			// A 1080p window, so client GameTest recordings fill a 1920x1080 screen as the other mods' do. At GUI
-			// scale 3 that is 640x360 GUI pixels: the same overlay size these recordings have always had at 1280x720
-			// and scale 2, only sharper.
+			// A 1080p window, so a recording fills a 1920x1080 screen. At GUI scale 3 that is 640x360 GUI pixels, the
+			// same overlay size as scale 2 at 1280x720, only sharper.
 			programArgs "--width", "1920", "--height", "1080"
 			// A host whose DevAuth config enables it would otherwise wait forever for a Microsoft login.
 			vmArg "-Ddevauth.enabled=false"

@@ -23,16 +23,19 @@ import org.jetbrains.annotations.Nullable;
 
 /**
  * Vanilla decides by the {@code BED_RULE} environment attribute at the bed's head: {@code BedBlock#useWithoutItem}
- * blows the bed up when it {@code explodes()}, whatever else the rule says, and {@code ServerPlayer#startSleepInBed}
- * refuses unless it {@code canSleep(level)}. {@code BED_RULE} is not synced to clients (it is not {@code syncable()} in
- * {@code EnvironmentAttributes}, and the client decodes dimension types and biomes with codecs that keep only syncable
- * attributes), so a client level always reads the default rule: sleep when dark, never explode.
+ * blows the bed up when it {@code explodes()}, whatever else the rule says ({@code BedBlock.java:94-105}), and
+ * {@code ServerPlayer#startSleepInBed} refuses unless it {@code canSleep(level)} ({@code ServerPlayer.java:1177-1180}).
+ * {@code BED_RULE} is not synced to clients: it has no {@code syncable()} ({@code EnvironmentAttributes.java:105}), and
+ * the client decodes dimension types and biomes with codecs that drop every attribute without it
+ * ({@code EnvironmentAttributeMap.java:24}, {@code DimensionType.java:50}, {@code Biome.java:46}), so a client level
+ * always reads the default rule: sleep when dark, never explode.
  */
 public final class AutoSleeper {
     static final int RETRY_INTERVAL_TICKS = 20;
     /**
-     * Ticks to wait after waking up. The server skips the night and wakes everyone in the same tick, but it sends
-     * the new day time only once a second, so until then the client still sees night and would get back into bed.
+     * Ticks to wait after waking up. The server skips the night and wakes everyone in the same tick
+     * ({@code ServerLevel.java:352-358}), but it sends the new day time only every 20 ticks
+     * ({@code MinecraftServer.java:1109}), so until then the client still sees night and would get back into bed.
      */
     static final int WAKE_UP_GRACE_TICKS = 40;
     /** Ticks before a look that missed the bed is tried again: the bed itself has not moved. */
@@ -40,16 +43,15 @@ public final class AutoSleeper {
 
     private static final int SEARCH_RADIUS_HORIZONTAL = 24;
     private static final int SEARCH_RADIUS_VERTICAL = 6;
-    /** How far the player's feet may be from a bed block: vanilla's {@code ServerPlayer#isReachableBedBlock}. */
+    /** How far the player's feet may be from a bed block: vanilla's {@code ServerPlayer#isReachableBedBlock}
+     * ({@code ServerPlayer.java:1242-1245}). */
     private static final double BED_RANGE_HORIZONTAL = 3.0D;
     private static final double BED_RANGE_VERTICAL = 2.0D;
 
     private int cooldownTicks;
     private boolean wasSleeping;
-    /** Whether the last tick's answer to "would the game let me sleep here" was yes. */
     private boolean maySleepHere;
     private @Nullable BlockPos walkingTo;
-    /** Whether the walk this mod started has already been noticed as finished. */
     private boolean walkEnded;
     /** The integrated server's latest answer, written on the server thread; see {@link #integratedServerAllows}. */
     private volatile @Nullable ServerAnswer serverAnswer;
@@ -81,8 +83,9 @@ public final class AutoSleeper {
             return;
         }
 
-        // Read every tick, because the answer changes with the time of day, and the client's day time is exact: the
-        // walk starts on the first tick the game would let the player sleep, not on the next retry.
+        // Read every tick, because the answer changes with the time of day, and the client's day time is exact: it ticks
+        // its own copy every tick between the server's 20-tick updates ({@code ClientLevel.java:328-330}), so the walk
+        // starts on the first tick the game would let the player sleep, not on the next retry.
         IntegratedServer server = minecraft.getSingleplayerServer();
         boolean allowedNow = server != null
                 ? clientRuleAllows(level, player.blockPosition())
@@ -143,8 +146,9 @@ public final class AutoSleeper {
     }
 
     /**
-     * Puts the view on the bed and uses it on the same tick, so no time is spent between walking there and lying down.
-     * The hit result is the game's own pick, so the bed is only used when the crosshair is on it, from vanilla reach.
+     * One look and the use on the same tick, as a player does with the mouse, so no time is spent between arriving and
+     * lying down. The hit result is the game's own pick, so the bed is only used when the crosshair is on it, from
+     * vanilla reach.
      */
     private Aim lookAndUse(Minecraft minecraft, LocalPlayer player, ClientLevel level, BlockPos bed) {
         if (!(level.getBlockState(bed).getBlock() instanceof BedBlock) || !inReach(player, bed)) {
@@ -168,7 +172,8 @@ public final class AutoSleeper {
         return Aim.USED;
     }
 
-    /** Either half of the same bed: vanilla lets a player use the bed from the foot as well as from the head. */
+    /** Either half of the same bed: vanilla lets a player use the bed from the foot as well as from the head
+     * ({@code BedBlock.java:86-92}). */
     private static boolean sameBed(ClientLevel level, BlockPos first, BlockPos second) {
         return level.getBlockState(first).getBlock() instanceof BedBlock
                 && level.getBlockState(second).getBlock() instanceof BedBlock
@@ -187,7 +192,8 @@ public final class AutoSleeper {
                 && question.equals(previousQuestion) && previousAnswer.maySleep();
     }
 
-    /** Runs on the integrated server's thread; a stopped server runs it in place, so it refuses there. */
+    /** Runs on the integrated server's thread; a stopped server runs it in place ({@code MinecraftServer.java:1480}),
+     * so it refuses there. */
     private static ServerAnswer askServer(IntegratedServer server, Question question) {
         ServerLevel level = server.isSameThread() ? server.getLevel(question.level().dimension()) : null;
         boolean maySleep = false;
@@ -198,7 +204,7 @@ public final class AutoSleeper {
         return new ServerAnswer(question, maySleep);
     }
 
-    /** The rule the client can read at a position: the default one everywhere a remote server has not sent it. */
+    /** The rule the client can read at a position: the default one, since no server ever sends it. */
     private static boolean clientRuleAllows(ClientLevel level, BlockPos pos) {
         BedRule rule = level.environmentAttributes().getValue(EnvironmentAttributes.BED_RULE, pos);
         return !rule.explodes() && rule.canSleep(level);
@@ -209,16 +215,18 @@ public final class AutoSleeper {
      * player's position before looking for a bed.
      */
     private static boolean remoteServerAllows(ClientLevel level, BlockPos pos) {
-        // vanilla-identity: the client cannot see BED_RULE (see above), so it can only rely on the rule of a vanilla
-        // dimension type, as long as the server's datapacks leave it alone: the Nether and the End have fixed time, so
-        // the default rule never lets anyone sleep there. Any other dimension type may make beds explode.
+        // The client cannot see BED_RULE (see above), so it can only rely on the rule of a vanilla dimension type, as
+        // long as the server's datapacks leave it alone: the Nether and the End have fixed time (the_nether.json,
+        // the_end.json), so the default rule never lets anyone sleep there. Any other dimension type may make beds
+        // explode.
+        // vanilla-identity: a non-vanilla dimension type's bed rule is unknowable on the client, so it is refused.
         if (!level.dimensionTypeRegistration().is(key -> key.identifier().getNamespace().equals(Identifier.DEFAULT_NAMESPACE))) {
             return false;
         }
         return clientRuleAllows(level, pos);
     }
 
-    /** The head half of a bed, where vanilla reads the bed rule ({@code BedBlock#useWithoutItem}). */
+    /** The head half of a bed, where vanilla reads the bed rule ({@code BedBlock.java:94}). */
     private static BlockPos bedHead(ClientLevel level, BlockPos bed) {
         BlockState state = level.getBlockState(bed);
         return state.getValue(BedBlock.PART) == BedPart.HEAD ? bed : bed.relative(state.getValue(BedBlock.FACING));
@@ -240,7 +248,8 @@ public final class AutoSleeper {
         return nearest;
     }
 
-    /** Vanilla reach to the bed: its own 3x2 block rule and the player's block interaction range. */
+    /** Vanilla reach to the bed: its own 3x2 block rule ({@code ServerPlayer.java:1242-1245}) and the player's block
+     * interaction range ({@code Player.java:2000}). */
     static boolean inReach(LocalPlayer player, BlockPos bed) {
         Vec3 bottomCenter = Vec3.atBottomCenterOf(bed);
         return Math.abs(player.getX() - bottomCenter.x) <= BED_RANGE_HORIZONTAL
@@ -268,13 +277,10 @@ public final class AutoSleeper {
     private record ServerAnswer(Question question, boolean maySleep) {
     }
 
-    /** What one tick of looking at a bed did. */
+    /** MISSED retries in {@link #MISSED_LOOK_RETRY_TICKS} ticks; GONE ends the attempt, so the two must stay apart. */
     private enum Aim {
-        /** The bed was used with the crosshair on it. */
         USED,
-        /** The crosshair did not land on the bed: nothing was used. */
         MISSED,
-        /** The bed is gone or out of reach: this attempt is over. */
         GONE
     }
 }

@@ -11,7 +11,8 @@ final class GameTestServers {
 
     /**
      * Short view and simulation distances, and a free port: two runs on one host would otherwise both bind the default
-     * port, and the second one's server fails to start (as MinecraftModConventions' {@code findAvailablePort} avoids).
+     * port, and the second one's server fails to start (as MinecraftModConventions' {@code findAvailablePort} avoids,
+     * {@code ClientGameTestServers.java:41}).
      */
     static Properties serverProperties() {
         Properties properties = new Properties();

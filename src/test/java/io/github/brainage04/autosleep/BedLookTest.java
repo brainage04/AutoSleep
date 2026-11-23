@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class BedLookTest {
-    /** A player standing on the block under their feet at y=1, eye 1.62 above it. */
+    /** A player whose feet are at y=1, eye 1.62 above them ({@code EntityType.java:1171}). */
     private static final Vec3 EYE = new Vec3(0.5D, 2.62D, 0.5D);
 
     @Test
@@ -31,7 +31,6 @@ class BedLookTest {
 
     @Test
     void oneLookCoversTheFullTurnInOneStep() {
-        // The mod no longer walks the view round at so many degrees a tick: the first step is the whole turn.
         assertAll(
                 () -> assertEquals(0.0F, BedLook.normalizeYaw(BedLook.yawTo(EYE, EYE.add(0.0D, 0.0D, 4.0D))), 1.0E-4F),
                 () -> assertEquals(-170.0F, BedLook.normalizeYaw(190.0F), 1.0E-4F),

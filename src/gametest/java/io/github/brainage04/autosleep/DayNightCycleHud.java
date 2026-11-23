@@ -23,7 +23,10 @@ public final class DayNightCycleHud {
     private static final int NIGHT_COLOR = 0xFF7FA7FF;
     /**
      * Readout only; the mod does not use them. The day times at which a clear Overworld sky is dark enough for vanilla
-     * to let players sleep (the {@code sky_light_level} track of {@code timeline/day.json} in 1.21.11).
+     * to let players sleep. The {@code sky_light_level} track of {@code timeline/day.json} (line 82) multiplies the
+     * dimension's 15 by 1.0 by day and by 0.26666668 at night, moving linearly between the two over ticks 11867-13670
+     * and 22330-24133, and {@code Level#isBrightOutside} calls the sky bright while that value is above 11
+     * ({@code Level.java:364-369}), which puts the two crossings at 12523 and 23478.
      */
     static final long NIGHT_START = 12523L;
     static final long NIGHT_END = 23478L;
