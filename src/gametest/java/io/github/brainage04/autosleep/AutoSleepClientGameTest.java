@@ -69,7 +69,7 @@ public class AutoSleepClientGameTest implements FabricClientGameTest {
      * bed is short enough to show at once.
      */
     private static final double RED_BED_FOUR_AND_A_HALF_BLOCKS_AWAY_Z = 2.5D;
-    /** In reach of the red bed's foot, 2.2 blocks north of it, inside the reach box. */
+    /** In reach of the red bed, 2.7 blocks north of its foot, inside the reach box. */
     private static final double IN_REACH_OF_THE_RED_BED_Z = 4.8D;
     /** The red bed is south of the start position, at larger Z: looking at it is yaw 0. */
     private static final float TOWARD_THE_RED_BED = 0.0F;
